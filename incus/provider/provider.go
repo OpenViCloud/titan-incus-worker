@@ -67,6 +67,13 @@ type Provider interface {
 	DeleteVolumeSnapshot(ctx context.Context, project string, pool string, volume string, snapshot string) error
 	ListVolumeSnapshots(ctx context.Context, project string, pool string, volume string) ([]api.StorageVolumeSnapshot, error)
 
+	// BackupInstance and BackupVolume have Incus upload an archive of the instance (root disk only) or of the volume
+	// to the S3 target itself, and wait for its operation. The operation ends before the upload does, and drops an upload
+	// failure (read in the v7.0.1 source): the caller checks the bucket (API extension backup_s3_upload; R2 measured in
+	// https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/backup/design.md#incus-backup).
+	BackupInstance(ctx context.Context, project string, name string, target api.BackupTarget) error
+	BackupVolume(ctx context.Context, project string, pool string, name string, target api.BackupTarget) error
+
 	// Images and aliases live in the default project: Titan's projects have features.images=false (lab 03c).
 	GetImageAlias(ctx context.Context, name string) (*api.ImageAliasesEntry, error)
 	ListImageAliases(ctx context.Context) ([]api.ImageAliasesEntry, error)
