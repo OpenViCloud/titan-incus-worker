@@ -38,7 +38,8 @@ func open(t *testing.T, store *fakeStore) *Bucket {
 	return New(server.URL, "titan-backup-dev", "key-id", "secret-key")
 }
 
-func TestHas_AnObjectThere_IsTrue_ReadPathStyle_AndSigned(t *testing.T) {
+// The fake's host is an IP, so the SDK writes the path style whatever the option says: this does not prove path-style.
+func TestHas_AnObjectThere_IsTrue_AndTheRequestIsSigned(t *testing.T) {
 	store := &fakeStore{objects: map[string]bool{"/titan-backup-dev/incus/a/b.tar.gz": true}}
 
 	has, err := open(t, store).Has(context.Background(), "incus/a/b.tar.gz")
@@ -63,7 +64,7 @@ func TestHas_NoObject_IsFalse_NotAnError(t *testing.T) {
 
 // Access denied is not "no object": the run fails now with the bucket's own answer, instead of polling for two minutes
 // for an object it can never see.
-func TestHas_Refused_IsAnError_WithoutTheKey(t *testing.T) {
+func TestHas_Refused_IsAnError_WithoutTheSecret(t *testing.T) {
 	store := &fakeStore{status: http.StatusForbidden}
 
 	has, err := open(t, store).Has(context.Background(), "incus/a/b.tar.gz")

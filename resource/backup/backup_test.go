@@ -344,3 +344,38 @@ func TestVolume_ObjectNeverArrives_IsRetryable(t *testing.T) {
 		t.Fatalf("want a retryable error, got %v", err)
 	}
 }
+
+// A volume run that died midway left its copy and its snapshot: the next run removes both before snapshotting again.
+func TestVolume_ARunAfterOneThatDiedMidway_RemovesItsLeftoversFirst(t *testing.T) {
+	p := testsupport.NewProvider()
+	p.Volumes[project+"/"+volumeName] = &api.StorageVolume{Name: volumeName, Type: "custom", Project: project}
+	p.Volumes[project+"/bkv"+encodedId] = &api.StorageVolume{Name: "bkv" + encodedId, Type: "custom", Project: project}
+	p.VolumeSnapshots[project+"/"+volumeName+"/backup"] = true
+
+	err := newVolume(p, target).Run(context.Background(), volumeLeased(), testsupport.DiscardLogger())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantStart := "delete-volume " + project + "/bkv" + encodedId + "\ndelete-volume-snapshot " + project + "/" + volumeName +
+		"/backup\nsnapshot-volume "
+	if !strings.HasPrefix(strings.Join(p.BackupOrder, "\n"), wantStart) {
+		t.Fatalf("order: %v", p.BackupOrder)
+	}
+}
+
+func TestVolume_GiveUp_RemovesLeftovers(t *testing.T) {
+	p := testsupport.NewProvider()
+	p.Volumes[project+"/bkv"+encodedId] = &api.StorageVolume{Name: "bkv" + encodedId, Type: "custom", Project: project}
+	p.VolumeSnapshots[project+"/"+volumeName+"/backup"] = true
+
+	err := newVolume(p, target).GiveUp(context.Background(), volumeLeased(), errors.New("cause"), testsupport.DiscardLogger())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "delete-volume " + project + "/bkv" + encodedId + "\ndelete-volume-snapshot " + project + "/" + volumeName + "/backup"
+	if strings.Join(p.BackupOrder, "\n") != want {
+		t.Fatalf("order: %v", p.BackupOrder)
+	}
+}
