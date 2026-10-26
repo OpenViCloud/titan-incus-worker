@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/OpenViCloud/titan-incus-worker/resource/backup"
 )
 
 type config struct {
@@ -14,6 +16,7 @@ type config struct {
 	reconcileInterval time.Duration
 	imageServer       string
 	healthAddr        string
+	backupTarget      backup.Target
 }
 
 // loadConfig reads the environment; lookup is os.Getenv outside tests.
@@ -23,6 +26,13 @@ func loadConfig(lookup func(string) string) (config, error) {
 		cpInternalToken: lookup("CP_INTERNAL_TOKEN"),
 		imageServer:     valueOr(lookup("IMAGE_SERVER"), "https://images.linuxcontainers.org"),
 		healthAddr:      valueOr(lookup("HEALTH_ADDR"), ":8080"),
+		// The key pair comes from an optional Secret: without it the worker starts, and backups fail saying so.
+		backupTarget: backup.Target{
+			Url:             lookup("BACKUP_S3_URL"),
+			Bucket:          lookup("BACKUP_S3_BUCKET"),
+			AccessKeyId:     lookup("BACKUP_S3_ACCESS_KEY_ID"),
+			SecretAccessKey: lookup("BACKUP_S3_SECRET_ACCESS_KEY"),
+		},
 	}
 	if loaded.cpBaseUrl == "" || loaded.cpInternalToken == "" {
 		return config{}, errors.New("CP_BASE_URL and CP_INTERNAL_TOKEN are required")

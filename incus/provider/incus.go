@@ -400,3 +400,29 @@ func (p *Incus) send(ctx context.Context, method string, project string, path st
 	}
 	return WaitOperation(ctx, p.server, operation.ID)
 }
+
+// BackupInstance asks for the instance alone: no snapshots, no attached volumes (each volume has its own backup).
+// Incus refuses a backup name when a target is set.
+func (p *Incus) BackupInstance(ctx context.Context, project string, name string, target api.BackupTarget) error {
+	request := api.InstanceBackupsPost{InstanceOnly: true, RootOnly: true, CompressionAlgorithm: "gzip", Target: &target}
+	operation, err := p.server.UseProject(project).CreateInstanceBackup(name, request)
+	if err != nil {
+		return fmt.Errorf("back up instance %s in project %s: %w", name, project, err)
+	}
+	if err := WaitOperation(ctx, p.server, operation.Get().ID); err != nil {
+		return fmt.Errorf("back up instance %s in project %s: %w", name, project, err)
+	}
+	return nil
+}
+
+func (p *Incus) BackupVolume(ctx context.Context, project string, pool string, name string, target api.BackupTarget) error {
+	request := api.StorageVolumeBackupsPost{VolumeOnly: true, CompressionAlgorithm: "gzip", Target: &target}
+	operation, err := p.server.UseProject(project).CreateStorageVolumeBackup(pool, name, request)
+	if err != nil {
+		return fmt.Errorf("back up volume %s in project %s: %w", name, project, err)
+	}
+	if err := WaitOperation(ctx, p.server, operation.Get().ID); err != nil {
+		return fmt.Errorf("back up volume %s in project %s: %w", name, project, err)
+	}
+	return nil
+}

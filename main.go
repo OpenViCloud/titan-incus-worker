@@ -15,11 +15,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/OpenViCloud/titan-incus-worker/bucket"
 	"github.com/OpenViCloud/titan-incus-worker/controlplane"
 	"github.com/OpenViCloud/titan-incus-worker/incus/cluster"
 	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 	"github.com/OpenViCloud/titan-incus-worker/loop/command"
 	"github.com/OpenViCloud/titan-incus-worker/loop/reconcile"
+	"github.com/OpenViCloud/titan-incus-worker/resource/backup"
 	"github.com/OpenViCloud/titan-incus-worker/resource/firewall"
 	"github.com/OpenViCloud/titan-incus-worker/resource/loadbalancer"
 	"github.com/OpenViCloud/titan-incus-worker/resource/network"
@@ -38,7 +40,13 @@ const (
 	networkCommandTimeout = 5 * time.Minute
 	storageCommandTimeout = 15 * time.Minute
 	templateSyncTimeout   = 60 * time.Minute
+	// Incus uploads a whole disk; on the dev Mac a 5 GiB root took 17 minutes at the link's upload speed.
+	backupTimeout = 6 * time.Hour
 )
+
+// backupKinds run on a loop of their own: one backup holds its loop for as long as the upload takes, and a tenant's
+// create or delete must not wait behind it.
+var backupKinds = []string{"vm.backup", "volume.backup"}
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil)).With("worker", hostnameOrUnknown())
@@ -53,15 +61,21 @@ func main() {
 
 	cp := controlplane.New(loaded.cpBaseUrl, loaded.cpInternalToken)
 	zones := cluster.NewResolver(cp, cluster.ConnectIncus, logger)
-	loop := command.NewLoop(cp, routes(cp, zones, loaded.imageServer), loaded.pollInterval, logger)
+	tenantRoutes, backupRoutes := splitBackupRoutes(routes(cp, zones, loaded.imageServer, loaded.backupTarget))
+	loop := command.NewLoop(cp, tenantRoutes, loaded.pollInterval, logger)
+	backupLoop := command.NewLoop(cp, backupRoutes, loaded.pollInterval, logger.With("loop", "backup"))
 	reconciler := reconcile.NewRunner(cp, zones, reconcilers(), loaded.reconcileInterval, logger)
 	health := healthServer(loaded.healthAddr)
 
 	var running sync.WaitGroup
-	running.Add(2)
+	running.Add(3)
 	go func() {
 		defer running.Done()
 		loop.Run(ctx)
+	}()
+	go func() {
+		defer running.Done()
+		backupLoop.Run(ctx)
 	}()
 	go func() {
 		defer running.Done()
@@ -76,6 +90,9 @@ func main() {
 	}()
 	logger.Info("incus-worker started", "controlPlane", loaded.cpBaseUrl, "pollInterval", loaded.pollInterval,
 		"reconcileInterval", loaded.reconcileInterval)
+	if missing := loaded.backupTarget.Missing(); len(missing) > 0 {
+		logger.Warn("no backup target: every vm.backup and volume.backup fails until it is set", "missing", missing)
+	}
 
 	<-ctx.Done()
 	logger.Info("shutting down")
@@ -85,7 +102,8 @@ func main() {
 	running.Wait()
 }
 
-func routes(cp *controlplane.Client, zones cluster.Zones, imageServer string) map[string]command.Route {
+func routes(cp *controlplane.Client, zones cluster.Zones, imageServer string, target backup.Target) map[string]command.Route {
+	objects := bucket.New(target.Url, target.Bucket, target.AccessKeyId, target.SecretAccessKey)
 	return map[string]command.Route{
 		"vm.create":            {Handler: vm.NewCreate(cp, zones), Timeout: vmCommandTimeout},
 		"vm.delete":            {Handler: vm.NewDelete(cp, zones), Timeout: vmCommandTimeout},
@@ -111,7 +129,24 @@ func routes(cp *controlplane.Client, zones cluster.Zones, imageServer string) ma
 		"vm-snapshot.create":      {Handler: vmsnapshot.NewCreate(cp, zones), Timeout: vmCommandTimeout},
 		"vm-snapshot.revert":      {Handler: vmsnapshot.NewRevert(cp, zones), Timeout: vmCommandTimeout},
 		"vm-snapshot.delete":      {Handler: vmsnapshot.NewDelete(cp, zones), Timeout: vmCommandTimeout},
+
+		"vm.backup":     {Handler: backup.NewVm(zones, target, objects), Timeout: backupTimeout},
+		"volume.backup": {Handler: backup.NewVolume(zones, target, objects), Timeout: backupTimeout},
 	}
+}
+
+// splitBackupRoutes takes the backup kinds out of all routes, for their own loop.
+func splitBackupRoutes(all map[string]command.Route) (map[string]command.Route, map[string]command.Route) {
+	tenant := map[string]command.Route{}
+	backups := map[string]command.Route{}
+	for kind, route := range all {
+		tenant[kind] = route
+	}
+	for _, kind := range backupKinds {
+		backups[kind] = tenant[kind]
+		delete(tenant, kind)
+	}
+	return tenant, backups
 }
 
 // reconcilers lists every resource the reconcile loop observes, in the order of one zone's cycle.

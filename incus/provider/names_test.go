@@ -32,6 +32,25 @@ func TestObjectNames_AreThePrefixAndTwentySixBase32Characters(t *testing.T) {
 	}
 }
 
+func TestBackupCopyNames_AreTheirPrefixAndTheSameBase32_ApartFromTheVmAndVolume(t *testing.T) {
+	instanceCopy, err := BackupInstanceCopyName(someId)
+	if err != nil {
+		t.Fatal(err)
+	}
+	volumeCopy, err := BackupVolumeCopyName(someId)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Oracle: the python3 line of the test above.
+	const encoded = "ceircejceiztgrcekvkvkvkvku"
+	if instanceCopy != "bk"+encoded || volumeCopy != "bkv"+encoded {
+		t.Fatalf("copies: %s %s", instanceCopy, volumeCopy)
+	}
+	if _, err := BackupInstanceCopyName("not-an-id"); err == nil {
+		t.Fatal("accepted a name that is not a Titan id")
+	}
+}
+
 func TestObjectNames_TheSameIdWithoutDashesOrInCapitals_IsTheSameName(t *testing.T) {
 	plain, _ := VolumeName(someId)
 	undashed, _ := VolumeName(strings.ReplaceAll(someId, "-", ""))

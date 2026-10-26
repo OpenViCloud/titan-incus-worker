@@ -105,6 +105,24 @@ type Provider struct {
 	ServerArchitectures []string
 	DeletedImages       []string
 	DeleteImageErr      error
+	// BackupOrder names each step a backup takes, in call order, e.g. "snapshot p/vm/backup".
+	BackupOrder     []string
+	InstanceBackups []InstanceBackup
+	VolumeBackups   []VolumeBackup
+	BackupErr       error
+}
+
+type InstanceBackup struct {
+	Project string
+	Name    string
+	Target  api.BackupTarget
+}
+
+type VolumeBackup struct {
+	Project string
+	Pool    string
+	Name    string
+	Target  api.BackupTarget
 }
 
 func NewProvider() *Provider {
@@ -165,6 +183,11 @@ func (p *Provider) GetInstance(ctx context.Context, project string, name string)
 func (p *Provider) CreateInstance(ctx context.Context, project string, instance api.InstancesPost) error {
 	p.count()
 	p.CreatedInstances = append(p.CreatedInstances, instance)
+	isCopy := instance.Source.Type == "copy"
+	if isCopy && p.CreateInstanceErr == nil {
+		p.BackupOrder = append(p.BackupOrder, "copy "+project+"/"+instance.Source.Source+" -> "+instance.Name)
+		p.Instances[project+"/"+instance.Name] = &api.Instance{Name: instance.Name, StatusCode: api.Stopped}
+	}
 	return p.CreateInstanceErr
 }
 
@@ -177,6 +200,10 @@ func (p *Provider) UpdateInstanceState(ctx context.Context, project string, name
 func (p *Provider) DeleteInstance(ctx context.Context, project string, name string) error {
 	p.count()
 	p.DeletedInstances = append(p.DeletedInstances, project+"/"+name)
+	if p.DeleteInstanceErr == nil {
+		p.BackupOrder = append(p.BackupOrder, "delete-instance "+project+"/"+name)
+		delete(p.Instances, project+"/"+name)
+	}
 	return p.DeleteInstanceErr
 }
 
@@ -459,6 +486,7 @@ func (p *Provider) CreateInstanceSnapshot(ctx context.Context, project string, i
 		return p.CreateSnapshotErr
 	}
 	p.InstanceSnapshots[project+"/"+instance+"/"+snapshot] = true
+	p.BackupOrder = append(p.BackupOrder, "snapshot "+project+"/"+instance+"/"+snapshot)
 	return nil
 }
 
@@ -480,6 +508,7 @@ func (p *Provider) DeleteInstanceSnapshot(ctx context.Context, project string, i
 		return NotFound("Instance_snapshot not found")
 	}
 	delete(p.InstanceSnapshots, key)
+	p.BackupOrder = append(p.BackupOrder, "delete-snapshot "+key)
 	return nil
 }
 
@@ -502,12 +531,19 @@ func (p *Provider) CreateVolume(ctx context.Context, project string, pool string
 		return p.CreateVolumeErr
 	}
 	p.Volumes[project+"/"+volume.Name] = &api.StorageVolume{Name: volume.Name, Type: "custom", Project: project}
+	if volume.Source.Type == "copy" {
+		p.BackupOrder = append(p.BackupOrder, "copy-volume "+project+"/"+volume.Source.Name+" -> "+volume.Name)
+	}
 	return nil
 }
 
 func (p *Provider) DeleteVolume(ctx context.Context, project string, pool string, name string) error {
 	p.count()
 	p.DeletedVolumes = append(p.DeletedVolumes, project+"/"+name)
+	if p.DeleteVolumeErr == nil {
+		p.BackupOrder = append(p.BackupOrder, "delete-volume "+project+"/"+name)
+		delete(p.Volumes, project+"/"+name)
+	}
 	return p.DeleteVolumeErr
 }
 
@@ -523,12 +559,17 @@ func (p *Provider) CreateVolumeSnapshot(ctx context.Context, project string, poo
 		return p.CreateSnapshotErr
 	}
 	p.VolumeSnapshots[project+"/"+volume+"/"+snapshot] = true
+	p.BackupOrder = append(p.BackupOrder, "snapshot-volume "+project+"/"+volume+"/"+snapshot)
 	return nil
 }
 
 func (p *Provider) DeleteVolumeSnapshot(ctx context.Context, project string, pool string, volume string, snapshot string) error {
 	p.count()
 	p.DeletedVolumeSnapshots = append(p.DeletedVolumeSnapshots, project+"/"+volume+"/"+snapshot)
+	if p.DeleteSnapshotErr == nil {
+		p.BackupOrder = append(p.BackupOrder, "delete-volume-snapshot "+project+"/"+volume+"/"+snapshot)
+		delete(p.VolumeSnapshots, project+"/"+volume+"/"+snapshot)
+	}
 	return p.DeleteSnapshotErr
 }
 
@@ -626,4 +667,24 @@ func (p *Provider) ListNetworkLoadBalancers(ctx context.Context, project string,
 		}
 	}
 	return found, nil
+}
+
+func (p *Provider) BackupInstance(ctx context.Context, project string, name string, target api.BackupTarget) error {
+	p.count()
+	p.BackupOrder = append(p.BackupOrder, "backup-instance "+project+"/"+name)
+	if p.BackupErr != nil {
+		return p.BackupErr
+	}
+	p.InstanceBackups = append(p.InstanceBackups, InstanceBackup{Project: project, Name: name, Target: target})
+	return nil
+}
+
+func (p *Provider) BackupVolume(ctx context.Context, project string, pool string, name string, target api.BackupTarget) error {
+	p.count()
+	p.BackupOrder = append(p.BackupOrder, "backup-volume "+project+"/"+name)
+	if p.BackupErr != nil {
+		return p.BackupErr
+	}
+	p.VolumeBackups = append(p.VolumeBackups, VolumeBackup{Project: project, Pool: pool, Name: name, Target: target})
+	return nil
 }

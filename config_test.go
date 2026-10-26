@@ -3,8 +3,12 @@ package main
 import (
 	"os"
 	"regexp"
+	"sort"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/OpenViCloud/titan-incus-worker/resource/backup"
 )
 
 func lookupFrom(values map[string]string) func(string) string {
@@ -72,13 +76,59 @@ func controlPlaneKinds(t *testing.T) []string {
 // removed one until the control plane has stopped
 // (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md#contract-changes).
 func TestRoutes_CoverTheControlPlanesKinds(t *testing.T) {
-	routes := routes(nil, nil, "")
+	routes := routes(nil, nil, "", backup.Target{})
 	kinds := controlPlaneKinds(t)
 
 	for _, kind := range kinds {
 		route, found := routes[kind]
 		if !found || route.Timeout <= 0 {
 			t.Errorf("%s: no route, or a route without a timeout", kind)
+		}
+	}
+}
+
+func TestLoadConfig_ReadsTheBackupTarget_AndStartsWithoutIt(t *testing.T) {
+	loaded, err := loadConfig(lookupFrom(map[string]string{
+		"CP_BASE_URL": "http://cp", "CP_INTERNAL_TOKEN": "t",
+		"BACKUP_S3_URL": "https://r2", "BACKUP_S3_BUCKET": "b", "BACKUP_S3_ACCESS_KEY_ID": "k", "BACKUP_S3_SECRET_ACCESS_KEY": "s",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := backup.Target{Url: "https://r2", Bucket: "b", AccessKeyId: "k", SecretAccessKey: "s"}
+	if loaded.backupTarget != want {
+		t.Fatalf("target: %+v", loaded.backupTarget)
+	}
+
+	withoutTarget, err := loadConfig(lookupFrom(map[string]string{"CP_BASE_URL": "http://cp", "CP_INTERNAL_TOKEN": "t"}))
+	if err != nil || len(withoutTarget.backupTarget.Missing()) != 4 {
+		t.Fatalf("err %v, missing %v", err, withoutTarget.backupTarget.Missing())
+	}
+}
+
+// A backup holds its loop for the whole upload; tenant commands must be leased by a loop that never runs one.
+func TestBackupKinds_HaveALoopOfTheirOwn(t *testing.T) {
+	tenant, backups := splitBackupRoutes(routes(nil, nil, "", backup.Target{}))
+
+	names := []string{}
+	for kind := range backups {
+		names = append(names, kind)
+	}
+	sort.Strings(names)
+	if strings.Join(names, ",") != "vm.backup,volume.backup" {
+		t.Fatalf("backup loop: %v", names)
+	}
+	for kind := range tenant {
+		if strings.HasSuffix(kind, ".backup") {
+			t.Errorf("%s is leased by the tenant loop", kind)
+		}
+	}
+	if len(tenant)+len(backups) != len(routes(nil, nil, "", backup.Target{})) {
+		t.Fatalf("a route was lost: %d + %d", len(tenant), len(backups))
+	}
+	for kind, route := range backups {
+		if route.Handler == nil || route.Timeout <= 0 {
+			t.Errorf("%s: no handler or no timeout", kind)
 		}
 	}
 }
