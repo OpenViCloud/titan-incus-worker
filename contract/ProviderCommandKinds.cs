@@ -25,4 +25,6 @@ public static class ProviderCommandKinds
     public const string LoadBalancerUpdate = "load-balancer.update";
     public const string LoadBalancerDelete = "load-balancer.delete";
     public const string TemplateSync = "template.sync";
+    public const string VmBackup = "vm.backup";
+    public const string VolumeBackup = "volume.backup";
 }
