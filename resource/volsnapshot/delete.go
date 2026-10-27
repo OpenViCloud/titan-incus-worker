@@ -18,18 +18,17 @@ type deletePayload struct {
 	VolumeId           string `json:"volumeId"`
 	ExternalSnapshotId string `json:"externalSnapshotId"`
 	ProjectName        string `json:"projectName"`
-	ZoneId             string `json:"zoneId"`
 }
 
 // Delete runs volume-snapshot.delete and reports Deleted; giving up reports the request failed, which gives the snapshot
 // back (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#abandoned-request).
 type Delete struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewDelete(cp *controlplane.Client, zones cluster.Zones) *Delete {
-	return &Delete{cp: cp, zones: zones}
+func NewDelete(cp *controlplane.Client, clusters cluster.Clusters) *Delete {
+	return &Delete{cp: cp, clusters: clusters}
 }
 
 func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -45,12 +44,12 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return command.Permanent(err)
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	pool := provider.StoragePoolOrDefault(zone.StoragePool)
-	err = zone.Provider.DeleteVolumeSnapshot(ctx, payload.ProjectName, pool, parent, name)
+	pool := provider.StoragePoolOrDefault(cl.StoragePool)
+	err = cl.Provider.DeleteVolumeSnapshot(ctx, payload.ProjectName, pool, parent, name)
 	// 404: an earlier run deleted it, or its volume is gone and took it along (lab-storage 03, 07).
 	isAlreadyGone := provider.IsNotFound(err)
 	if err != nil && !isAlreadyGone {

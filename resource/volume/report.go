@@ -1,4 +1,4 @@
-// Package volume runs the volume provider commands and the zone's storage reconciler (volumes and volume snapshots).
+// Package volume runs the volume provider commands and the cluster's storage reconciler (volumes and volume snapshots).
 package volume
 
 import (

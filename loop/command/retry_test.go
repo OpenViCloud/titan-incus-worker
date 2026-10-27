@@ -30,7 +30,7 @@ func TestIsRetryable(t *testing.T) {
 		{"marked Permanent, then wrapped", fmt.Errorf("vm.create: %w", Permanent(errors.New("bad payload"))), false},
 		{"an error that says it is permanent", &permanentAnswer{permanent: true}, false},
 		{"an error that says it is not permanent", &permanentAnswer{permanent: false}, true},
-		{"an error that says it is permanent, wrapped twice", fmt.Errorf("zone z: %w (%w)", &permanentAnswer{permanent: true}, errors.New("404")), false},
+		{"an error that says it is permanent, wrapped twice", fmt.Errorf("cluster c: %w (%w)", &permanentAnswer{permanent: true}, errors.New("404")), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

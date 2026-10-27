@@ -1,4 +1,4 @@
-// Package vm runs the VM provider commands and the zone's VM reconciler.
+// Package vm runs the VM provider commands and the cluster's VM reconciler.
 package vm
 
 import (

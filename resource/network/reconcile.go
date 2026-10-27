@@ -25,19 +25,19 @@ type ReconcilableNetwork struct {
 	CurrentExistence string  `json:"currentExistence"`
 }
 
-// Reconcile observes one zone's networks and reports what differs; it never acts on Incus. A failed read skips the
+// Reconcile observes one cluster's networks and reports what differs; it never acts on Incus. A failed read skips the
 // cycle: reading it as "no network" would report every network gone.
-func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, zoneId string, logger *slog.Logger) error {
+func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error {
 	var rows []ReconcilableNetwork
-	if err := cp.GetJSON(ctx, "/internal/reconcile/networks?zoneId="+url.QueryEscape(zoneId), &rows); err != nil {
-		return fmt.Errorf("list reconcilable networks of zone %s: %w", zoneId, err)
+	if err := cp.GetJSON(ctx, "/internal/reconcile/networks?clusterId="+url.QueryEscape(clusterId), &rows); err != nil {
+		return fmt.Errorf("list reconcilable networks of cluster %s: %w", clusterId, err)
 	}
 	if len(rows) == 0 {
 		return nil
 	}
 	networks, err := p.ListNetworksAllProjects(ctx)
 	if err != nil {
-		return fmt.Errorf("observe networks of zone %s: %w", zoneId, err)
+		return fmt.Errorf("observe networks of cluster %s: %w", clusterId, err)
 	}
 	statusByName := map[string]string{}
 	for _, network := range networks {

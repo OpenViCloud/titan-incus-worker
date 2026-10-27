@@ -15,7 +15,7 @@ type Leased struct {
 	Id          string          `json:"id"`
 	Key         string          `json:"key"`
 	Kind        string          `json:"kind"`
-	ZoneId      string          `json:"zoneId"`
+	ClusterId   string          `json:"clusterId"`
 	Payload     json.RawMessage `json:"payload"`
 	Attempt     int             `json:"attempt"`
 	MaxAttempts int             `json:"maxAttempts"`

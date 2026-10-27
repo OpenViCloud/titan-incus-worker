@@ -25,15 +25,15 @@ type vmPayload struct {
 // stopped copy of a snapshot: one point in time, as after a power cut. Attached volumes are not in it; each has its own
 // volume.backup. The command is done when the archive is in the bucket; there is no callback.
 type Vm struct {
-	zones   cluster.Zones
-	target  Target
-	objects Objects
-	arrival Arrival
-	now     func() time.Time
+	clusters cluster.Clusters
+	target   Target
+	objects  Objects
+	arrival  Arrival
+	now      func() time.Time
 }
 
-func NewVm(zones cluster.Zones, target Target, objects Objects) *Vm {
-	return &Vm{zones: zones, target: target, objects: objects, arrival: DefaultArrival, now: time.Now}
+func NewVm(clusters cluster.Clusters, target Target, objects Objects) *Vm {
+	return &Vm{clusters: clusters, target: target, objects: objects, arrival: DefaultArrival, now: time.Now}
 }
 
 func (h *Vm) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -48,11 +48,11 @@ func (h *Vm) Run(ctx context.Context, leased command.Leased, logger *slog.Logger
 	if err != nil {
 		return command.Permanent(err)
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	p := zone.Provider
+	p := cl.Provider
 	project, instance := payload.ProjectName, payload.ExternalVmId
 
 	_, err = p.GetInstance(ctx, project, instance)
@@ -69,7 +69,7 @@ func (h *Vm) Run(ctx context.Context, leased command.Leased, logger *slog.Logger
 	if err := p.CreateInstanceSnapshot(ctx, project, instance, snapshotName); err != nil {
 		return err
 	}
-	key := ObjectKey(leased.ZoneId, payload.TenantId, "vms", payload.VmId, h.now())
+	key := ObjectKey(leased.ClusterId, payload.TenantId, "vms", payload.VmId, h.now())
 	runErr := copyAndUpload(ctx, p, project, instance, copyName, h.target.upload(key))
 	cleanUp(logger,
 		func(ctx context.Context) error { return deleteInstanceIfThere(ctx, p, project, copyName) },
@@ -108,11 +108,11 @@ func (h *Vm) GiveUp(ctx context.Context, leased command.Leased, cause error, log
 	if err != nil {
 		return nil
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return nil
 	}
-	if err := removeVmLeftovers(ctx, zone.Provider, payload.ProjectName, payload.ExternalVmId, copyName); err != nil {
+	if err := removeVmLeftovers(ctx, cl.Provider, payload.ProjectName, payload.ExternalVmId, copyName); err != nil {
 		logger.Warn("removing the backup's leftovers failed; the next run removes them", "error", err)
 	}
 	return nil

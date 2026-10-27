@@ -24,7 +24,6 @@ var errWrongArchitecture = errors.New("wrong architecture")
 
 type syncPayload struct {
 	TemplateId     string `json:"templateId"`
-	ZoneId         string `json:"zoneId"`
 	Name           string `json:"name"`
 	Description    string `json:"description"`
 	OsImageName    string `json:"osImageName"`
@@ -32,16 +31,16 @@ type syncPayload struct {
 	RootDiskSizeGb *int   `json:"rootDiskSizeGb"`
 }
 
-// Sync puts the template's VM image into the zone's cluster under the template's alias: the distro's own image when
+// Sync puts the template's VM image into the cluster under the template's alias: the distro's own image when
 // the template has an imageUrl, else osImageName pulled from the image server.
 type Sync struct {
 	cp          *controlplane.Client
-	zones       cluster.Zones
+	clusters    cluster.Clusters
 	imageServer string
 }
 
-func NewSync(cp *controlplane.Client, zones cluster.Zones, imageServer string) *Sync {
-	return &Sync{cp: cp, zones: zones, imageServer: imageServer}
+func NewSync(cp *controlplane.Client, clusters cluster.Clusters, imageServer string) *Sync {
+	return &Sync{cp: cp, clusters: clusters, imageServer: imageServer}
 }
 
 func (h *Sync) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -53,13 +52,13 @@ func (h *Sync) Run(ctx context.Context, leased command.Leased, logger *slog.Logg
 	if !isComplete {
 		return command.Permanent(errors.New("template.sync payload lacks templateId or osImageName"))
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
 
 	alias := provider.TemplateAlias(payload.TemplateId)
-	_, err = zone.Provider.GetImageAlias(ctx, alias)
+	_, err = cl.Provider.GetImageAlias(ctx, alias)
 	isMissing := provider.IsNotFound(err)
 	if err != nil && !isMissing {
 		return err
@@ -68,19 +67,19 @@ func (h *Sync) Run(ctx context.Context, leased command.Leased, logger *slog.Logg
 		logger.Info("template image already present", "alias", alias)
 	}
 	if isMissing {
-		err := h.makeImage(ctx, zone.Provider, payload, alias)
+		err := h.makeImage(ctx, cl.Provider, payload, alias)
 		// Another run finished the same pull or import first.
 		isOurs := provider.IsOperationFailureContaining(err, "already exists")
 		if err != nil && !isOurs {
 			return err
 		}
 	}
-	if err := ensureClusterArchitecture(ctx, zone.Provider, alias, payload.OsImageName); err != nil {
+	if err := ensureClusterArchitecture(ctx, cl.Provider, alias, payload.OsImageName); err != nil {
 		return err
 	}
 	return sendStatus(ctx, h.cp, payload.TemplateId, statusReport{
 		Report:     reportCreated,
-		ZoneId:     leased.ZoneId,
+		ClusterId:  leased.ClusterId,
 		ExternalId: alias,
 	})
 }
@@ -162,10 +161,10 @@ func (h *Sync) GiveUp(ctx context.Context, leased command.Leased, cause error, l
 		detail = detail[:maxDetail]
 	}
 	return sendStatus(ctx, h.cp, payload.TemplateId, statusReport{
-		Report: reportRequestFailed,
-		ZoneId: leased.ZoneId,
-		Reason: giveUpReason(cause),
-		Detail: string(detail),
+		Report:    reportRequestFailed,
+		ClusterId: leased.ClusterId,
+		Reason:    giveUpReason(cause),
+		Detail:    string(detail),
 	})
 }
 

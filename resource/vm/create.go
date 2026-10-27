@@ -22,7 +22,7 @@ const (
 	defaultPool    = "default"
 )
 
-// createPayload mirrors ProviderCommandQueue.EnqueueVmCreateAsync. templateId is already the zone's image alias.
+// createPayload mirrors ProviderCommandQueue.EnqueueVmCreateAsync. templateId is already the cluster's image alias.
 type createPayload struct {
 	VmId              string  `json:"vmId"`
 	Name              string  `json:"name"`
@@ -30,7 +30,6 @@ type createPayload struct {
 	VcpuCount         int     `json:"vcpuCount"`
 	MemoryMb          int     `json:"memoryMb"`
 	TemplateId        string  `json:"templateId"`
-	ZoneId            string  `json:"zoneId"`
 	ExternalNetworkId string  `json:"externalNetworkId"`
 	ProjectName       string  `json:"projectName"`
 	DiskSizeGb        int     `json:"diskSizeGb"`
@@ -38,15 +37,15 @@ type createPayload struct {
 	VendorData        string  `json:"vendorData"`
 }
 
-// Create runs vm.create. It reports only the provider id (Created) or the give-up; the zone's reconciler reports
+// Create runs vm.create. It reports only the provider id (Created) or the give-up; the cluster's reconciler reports
 // Running (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#desired-and-current).
 type Create struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewCreate(cp *controlplane.Client, zones cluster.Zones) *Create {
-	return &Create{cp: cp, zones: zones}
+func NewCreate(cp *controlplane.Client, clusters cluster.Clusters) *Create {
+	return &Create{cp: cp, clusters: clusters}
 }
 
 func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -54,19 +53,19 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return err
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	if err := provider.EnsureProject(ctx, zone.Provider, payload.ProjectName); err != nil {
+	if err := provider.EnsureProject(ctx, cl.Provider, payload.ProjectName); err != nil {
 		return err
 	}
 
-	request, err := InstanceRequest(payload, zone.StoragePool)
+	request, err := InstanceRequest(payload, cl.StoragePool)
 	if err != nil {
 		return command.Permanent(err)
 	}
-	err = zone.Provider.CreateInstance(ctx, payload.ProjectName, request)
+	err = cl.Provider.CreateInstance(ctx, payload.ProjectName, request)
 	// A lease that ran out can overlap a second run of the same create; the name is ours, so the instance is too.
 	isOurs := err != nil && provider.IsInstanceAlreadyExists(err)
 	if err != nil && !isOurs {
@@ -76,7 +75,7 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 		logger.Info("already exists; treating it as ours", "object", request.Name)
 		// The earlier run may have died between creating and starting it: a stopped instance here would leave the
 		// VM waiting for a Running that nothing asks for.
-		if err := startIfStopped(ctx, zone.Provider, payload.ProjectName, request.Name, logger); err != nil {
+		if err := startIfStopped(ctx, cl.Provider, payload.ProjectName, request.Name, logger); err != nil {
 			return err
 		}
 	}
@@ -93,7 +92,7 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	}
 	report := statusReport{
 		Report:     reportRequestFailed,
-		ExternalId: h.existingInstance(ctx, leased.ZoneId, payload),
+		ExternalId: h.existingInstance(ctx, leased.ClusterId, payload),
 		Reason:     reasonProvisionFailed,
 		Detail:     cause.Error(),
 	}
@@ -101,11 +100,11 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 }
 
 // existingInstance returns the instance name when it is on Incus, "" when it is not or cannot be read.
-func (h *Create) existingInstance(ctx context.Context, zoneId string, payload createPayload) string {
+func (h *Create) existingInstance(ctx context.Context, clusterId string, payload createPayload) string {
 	if payload.ProjectName == "" {
 		return ""
 	}
-	zone, err := h.zones.Zone(ctx, zoneId)
+	cl, err := h.clusters.Cluster(ctx, clusterId)
 	if err != nil {
 		return ""
 	}
@@ -113,7 +112,7 @@ func (h *Create) existingInstance(ctx context.Context, zoneId string, payload cr
 	if err != nil {
 		return ""
 	}
-	_, err = zone.Provider.GetInstance(ctx, payload.ProjectName, name)
+	_, err = cl.Provider.GetInstance(ctx, payload.ProjectName, name)
 	if err != nil {
 		return ""
 	}

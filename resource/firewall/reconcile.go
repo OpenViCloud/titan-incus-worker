@@ -28,19 +28,19 @@ type ReconcilableRule struct {
 	CurrentExistence string  `json:"currentExistence"`
 }
 
-// Reconcile observes one zone's firewall rules — every ACL of every project in one read — and reports what differs;
+// Reconcile observes one cluster's firewall rules — every ACL of every project in one read — and reports what differs;
 // it never acts on Incus. A failed read skips the cycle: reading it as "no rule" would report every rule gone.
-func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, zoneId string, logger *slog.Logger) error {
+func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error {
 	var rows []ReconcilableRule
-	if err := cp.GetJSON(ctx, "/internal/reconcile/firewall-rules?zoneId="+url.QueryEscape(zoneId), &rows); err != nil {
-		return fmt.Errorf("list reconcilable firewall rules of zone %s: %w", zoneId, err)
+	if err := cp.GetJSON(ctx, "/internal/reconcile/firewall-rules?clusterId="+url.QueryEscape(clusterId), &rows); err != nil {
+		return fmt.Errorf("list reconcilable firewall rules of cluster %s: %w", clusterId, err)
 	}
 	if len(rows) == 0 {
 		return nil
 	}
 	acls, err := p.ListNetworkACLsAllProjects(ctx)
 	if err != nil {
-		return fmt.Errorf("observe network ACLs of zone %s: %w", zoneId, err)
+		return fmt.Errorf("observe network ACLs of cluster %s: %w", clusterId, err)
 	}
 	stateById := map[string]string{}
 	for _, acl := range acls {

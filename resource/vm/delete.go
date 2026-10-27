@@ -19,19 +19,18 @@ type deletePayload struct {
 	VmId         string `json:"vmId"`
 	ExternalVmId string `json:"externalVmId"`
 	ProjectName  string `json:"projectName"`
-	ZoneId       string `json:"zoneId"`
 }
 
 // Delete runs vm.delete and reports Deleted once Incus no longer has the instance
 // (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#forget-on-provider-confirm). It has no give-up callback: the VM keeps its
 // delete waiting, and a repeated delete reruns the failed command.
 type Delete struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewDelete(cp *controlplane.Client, zones cluster.Zones) *Delete {
-	return &Delete{cp: cp, zones: zones}
+func NewDelete(cp *controlplane.Client, clusters cluster.Clusters) *Delete {
+	return &Delete{cp: cp, clusters: clusters}
 }
 
 func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -43,11 +42,11 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if !isComplete {
 		return command.Permanent(fmt.Errorf("vm.delete payload lacks vmId, externalVmId or projectName"))
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	if err := removeInstance(ctx, zone.Provider, payload.ProjectName, payload.ExternalVmId, logger); err != nil {
+	if err := removeInstance(ctx, cl.Provider, payload.ProjectName, payload.ExternalVmId, logger); err != nil {
 		return err
 	}
 	return sendStatus(ctx, h.cp, payload.VmId, statusReport{Report: reportDeleted})

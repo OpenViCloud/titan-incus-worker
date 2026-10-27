@@ -13,12 +13,12 @@ import (
 // Update runs load-balancer.update: the whole asked configuration in one write, then Updated with the intent it ends.
 // A VIP Incus lost is made again rather than left failing.
 type Update struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewUpdate(cp *controlplane.Client, zones cluster.Zones) *Update {
-	return &Update{cp: cp, zones: zones}
+func NewUpdate(cp *controlplane.Client, clusters cluster.Clusters) *Update {
+	return &Update{cp: cp, clusters: clusters}
 }
 
 func (h *Update) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -32,15 +32,15 @@ func (h *Update) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if payload.IntentId == "" {
 		return command.Permanent(errors.New("load-balancer.update payload lacks intentId"))
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	put, err := incusSpec(ctx, zone.Provider, payload)
+	put, err := incusSpec(ctx, cl.Provider, payload)
 	if err != nil {
 		return err
 	}
-	if err := apply(ctx, zone.Provider, payload, put); err != nil {
+	if err := apply(ctx, cl.Provider, payload, put); err != nil {
 		return err
 	}
 	return sendStatus(ctx, h.cp, payload.LoadBalancerId, statusReport{Report: reportUpdated, IntentId: payload.IntentId})

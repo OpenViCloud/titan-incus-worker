@@ -14,12 +14,12 @@ import (
 // Create runs load-balancer.create: the VIP on the network with the asked configuration, then Created with the VIP as
 // the provider id.
 type Create struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewCreate(cp *controlplane.Client, zones cluster.Zones) *Create {
-	return &Create{cp: cp, zones: zones}
+func NewCreate(cp *controlplane.Client, clusters cluster.Clusters) *Create {
+	return &Create{cp: cp, clusters: clusters}
 }
 
 func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -30,15 +30,15 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := payload.check(); err != nil {
 		return err
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	put, err := incusSpec(ctx, zone.Provider, payload)
+	put, err := incusSpec(ctx, cl.Provider, payload)
 	if err != nil {
 		return err
 	}
-	if err := apply(ctx, zone.Provider, payload, put); err != nil {
+	if err := apply(ctx, cl.Provider, payload, put); err != nil {
 		return err
 	}
 	return sendStatus(ctx, h.cp, payload.LoadBalancerId, statusReport{Report: reportCreated, ExternalId: payload.Vip})
@@ -55,9 +55,9 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 		return command.Permanent(errors.New("load-balancer.create payload lacks loadBalancerId: nobody to tell"))
 	}
 	report := statusReport{Report: reportRequestFailed, Reason: reasonCreateFailed, Detail: cause.Error()}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err == nil {
-		_, _, err = zone.Provider.GetNetworkLoadBalancer(ctx, payload.ProjectName, payload.ExternalNetworkId, payload.Vip)
+		_, _, err = cl.Provider.GetNetworkLoadBalancer(ctx, payload.ProjectName, payload.ExternalNetworkId, payload.Vip)
 		if err == nil {
 			report.ExternalId = payload.Vip
 		} else if !provider.IsNotFound(err) {

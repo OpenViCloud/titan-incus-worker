@@ -16,16 +16,16 @@ import (
 
 const (
 	templateId  = "11111111-2222-3333-4444-555555555555"
-	zoneId      = "mock"
+	clusterId   = "mock"
 	imageServer = "https://images.example.test"
 )
 
 func syncLeased() command.Leased {
 	encoded, _ := json.Marshal(map[string]any{
-		"templateId": templateId, "zoneId": zoneId, "name": "Alma-9-DB", "description": "",
+		"templateId": templateId, "name": "Alma-9-DB", "description": "",
 		"osImageName": "almalinux/9", "rootDiskSizeGb": nil,
 	})
-	return command.Leased{Kind: "template.sync", ZoneId: zoneId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
+	return command.Leased{Kind: "template.sync", ClusterId: clusterId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
 }
 
 func onlyBody(t *testing.T, cp *testsupport.ControlPlane) map[string]any {
@@ -46,7 +46,7 @@ func TestSync_AliasPresent_DoesNotPull_AndReportsCreated(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.Aliases["tpl-"+templateId] = true
 
-	err := NewSync(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
+	err := NewSync(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func TestSync_AliasPresent_DoesNotPull_AndReportsCreated(t *testing.T) {
 		t.Fatal("pulled an image the cluster has")
 	}
 	body := onlyBody(t, cp)
-	if body["report"] != "Created" || body["zoneId"] != zoneId || body["externalId"] != "tpl-"+templateId {
+	if body["report"] != "Created" || body["clusterId"] != clusterId || body["externalId"] != "tpl-"+templateId {
 		t.Fatalf("report: %v", body)
 	}
 }
@@ -64,7 +64,7 @@ func TestSync_AliasMissing_PullsTheVmImageUnderTheAlias(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewSync(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
+	err := NewSync(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestSync_AliasCreatedByAnotherRun_IsCreated(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.CreateImageErr = &provider.OperationFailedError{Status: "Failure", Message: `Alias "tpl-` + templateId + `" already exists`}
 
-	err := NewSync(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
+	err := NewSync(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestSync_ImageOfAnotherArchitecture_IsDeletedAndFailsForGood(t *testing.T) 
 	p.ServerArchitectures = []string{"aarch64", "armv6l", "armv7l", "armv8l"}
 	p.ImageArchitectures["fp-tpl-"+templateId] = "x86_64"
 
-	err := NewSync(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
+	err := NewSync(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want a permanent failure, got %v", err)
@@ -124,7 +124,7 @@ func TestSync_DeleteOfAWrongArchitectureImageFails_IsRetriedWithTheMismatchAsRea
 	p.ImageArchitectures["fp-tpl-"+templateId] = "x86_64"
 	p.DeleteImageErr = errors.New("connection reset")
 
-	err := NewSync(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
+	err := NewSync(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want a retryable failure, got %v", err)
@@ -141,7 +141,7 @@ func TestSync_AliasPresentOnAnotherArchitecture_IsCheckedToo(t *testing.T) {
 	p.ServerArchitectures = []string{"aarch64"}
 	p.ImageArchitectures["fp-tpl-"+templateId] = "x86_64"
 
-	err := NewSync(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
+	err := NewSync(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want a permanent failure, got %v", err)
@@ -157,7 +157,7 @@ func TestSync_ImageOfTheClusterArchitecture_IsCreated(t *testing.T) {
 	p.ServerArchitectures = []string{"aarch64", "armv6l", "armv7l", "armv8l"}
 	p.ImageArchitectures["fp-tpl-"+templateId] = "aarch64"
 
-	err := NewSync(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
+	err := NewSync(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +170,7 @@ func TestSync_ImageOfTheClusterArchitecture_IsCreated(t *testing.T) {
 	}
 }
 
-func TestSync_GiveUp_ReportsRequestFailedWithItsZone_AFixedReason_AndTheRawError(t *testing.T) {
+func TestSync_GiveUp_ReportsRequestFailedWithItsCluster_AFixedReason_AndTheRawError(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
 	err := NewSync(cp.Client(), cluster.Fixed{}, imageServer).GiveUp(context.Background(), syncLeased(), errors.New("pull timed out"), testsupport.DiscardLogger())
@@ -179,7 +179,7 @@ func TestSync_GiveUp_ReportsRequestFailedWithItsZone_AFixedReason_AndTheRawError
 		t.Fatal(err)
 	}
 	body := onlyBody(t, cp)
-	isRequestFailed := body["report"] == "RequestFailed" && body["zoneId"] == zoneId
+	isRequestFailed := body["report"] == "RequestFailed" && body["clusterId"] == clusterId
 	if !isRequestFailed || body["reason"] != reasonSyncFailed || body["detail"] != "pull timed out" {
 		t.Fatalf("report: %v", body)
 	}
@@ -189,7 +189,7 @@ func TestSync_GiveUp_ReportsRequestFailedWithItsZone_AFixedReason_AndTheRawError
 }
 
 // The reason tells the operator which of the causes they can act on it was: a cluster of another architecture, or a
-// zone with no cluster (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/catalog/design.md#template-reports).
+// cluster that is not configured (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/catalog/design.md#template-reports).
 func TestSync_GiveUp_NamesTheCauseInTheReason(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -201,7 +201,7 @@ func TestSync_GiveUp_NamesTheCauseInTheReason(t *testing.T) {
 			p.ServerArchitectures = []string{"aarch64"}
 			p.ImageArchitectures["fp-tpl-"+templateId] = "x86_64"
 			cp := testsupport.NewControlPlane(t)
-			return NewSync(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
+			return NewSync(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), testsupport.DiscardLogger())
 		}, reasonWrongArchitecture},
 		{"no cluster", func() error {
 			cp := testsupport.NewControlPlane(t)
@@ -262,9 +262,9 @@ func TestDecideReport_SendsOnlyChanges(t *testing.T) {
 	}
 }
 
-func TestReconcile_ReportsAnAliasGoneWithTheZone(t *testing.T) {
+func TestReconcile_ReportsAnAliasGoneWithTheCluster(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond(http.MethodGet, "/internal/reconcile/templates?zoneId=mock", http.StatusOK,
+	cp.Respond(http.MethodGet, "/internal/reconcile/templates?clusterId=mock", http.StatusOK,
 		`[{"id":"`+templateId+`","externalTemplateId":"tpl-gone","currentExistence":"Exists"}]`)
 	logger, logs := testsupport.NewLogCapture(t)
 
@@ -274,7 +274,7 @@ func TestReconcile_ReportsAnAliasGoneWithTheZone(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := onlyBody(t, cp)
-	if body["report"] != "Observed" || body["exists"] != false || body["zoneId"] != "mock" {
+	if body["report"] != "Observed" || body["exists"] != false || body["clusterId"] != "mock" {
 		t.Fatalf("report: %v", body)
 	}
 	sent := logs.One("reconcile report sent")
@@ -290,7 +290,7 @@ func TestSync_AliasPresent_SaysSo_InTheLog(t *testing.T) {
 	p.Aliases["tpl-"+templateId] = true
 	logger, logs := testsupport.NewLogCapture(t)
 
-	err := NewSync(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), logger)
+	err := NewSync(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}, imageServer).Run(context.Background(), syncLeased(), logger)
 
 	if err != nil {
 		t.Fatal(err)

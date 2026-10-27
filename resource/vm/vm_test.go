@@ -19,25 +19,25 @@ import (
 const instanceName = "vmceircejceiztgrcekvkvkvkvku"
 
 const (
-	vmId     = "11111111-2222-3333-4444-555555555555"
-	project  = "t-0123456789abcdef0123456789abcdef"
-	zoneId   = "mock"
-	intentId = "99999999-8888-7777-6666-555555555555"
+	vmId      = "11111111-2222-3333-4444-555555555555"
+	project   = "t-0123456789abcdef0123456789abcdef"
+	clusterId = "mock"
+	intentId  = "99999999-8888-7777-6666-555555555555"
 )
 
-func zones(p *testsupport.Provider) cluster.Fixed {
-	return cluster.Fixed{zoneId: {Provider: p, StoragePool: "pool1", OvnUplinkNetwork: "ovnup"}}
+func clusters(p *testsupport.Provider) cluster.Fixed {
+	return cluster.Fixed{clusterId: {Provider: p, StoragePool: "pool1", OvnUplinkNetwork: "ovnup"}}
 }
 
 func leased(kind string, payload map[string]any) command.Leased {
 	encoded, _ := json.Marshal(payload)
-	return command.Leased{Kind: kind, ZoneId: zoneId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
+	return command.Leased{Kind: kind, ClusterId: clusterId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
 }
 
 func createLeased(overrides map[string]any) command.Leased {
 	payload := map[string]any{
 		"vmId": vmId, "name": "web-1", "vmOfferingId": "m", "cpuUnits": 1.5, "vcpuCount": 2, "memoryMb": 2048,
-		"templateId": "tpl-abc", "zoneId": zoneId, "externalNetworkId": "net-1", "projectName": project,
+		"templateId": "tpl-abc", "externalNetworkId": "net-1", "projectName": project,
 		"diskSizeGb": 20, "userData": "",
 	}
 	for key, value := range overrides {
@@ -63,7 +63,7 @@ func TestCreate_BuildsTheInstance_AndReportsCreatedWithTheInstanceName(t *testin
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(nil), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(nil), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestCreate_BareCloudConfigHeader_IsDropped(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(map[string]any{"userData": "#cloud-config\n"}), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(map[string]any{"userData": "#cloud-config\n"}), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestCreate_CloudConfigWithContent_IsSent(t *testing.T) {
 	p := testsupport.NewProvider()
 	userData := "#cloud-config\npackage_update: false\n"
 
-	NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(map[string]any{"userData": userData}), testsupport.DiscardLogger())
+	NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(map[string]any{"userData": userData}), testsupport.DiscardLogger())
 
 	if p.CreatedInstances[0].Config["cloud-init.user-data"] != userData {
 		t.Fatal("user data with content was dropped")
@@ -125,7 +125,7 @@ func TestCreate_VendorData_IsSentAsCloudInitVendorData(t *testing.T) {
 	vendorData := "#!/bin/sh\necho keys\n"
 	userData := "#cloud-config\npackage_update: false\n"
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(),
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(),
 		createLeased(map[string]any{"vendorData": vendorData, "userData": userData}), testsupport.DiscardLogger())
 
 	if err != nil {
@@ -146,7 +146,7 @@ func TestCreate_NoVendorData_SetsNoKey(t *testing.T) {
 		cp := testsupport.NewControlPlane(t)
 		p := testsupport.NewProvider()
 
-		err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(payload), testsupport.DiscardLogger())
+		err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(payload), testsupport.DiscardLogger())
 
 		if err != nil {
 			t.Fatal(err)
@@ -165,7 +165,7 @@ func TestCreate_InstanceAlreadyExists_IsOurs_AndReportsCreated(t *testing.T) {
 	p.CreateInstanceErr = api.StatusErrorf(http.StatusInternalServerError, `Instance "%s" already exists`, instanceName)
 	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName, StatusCode: api.Running}
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(nil), logger)
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(nil), logger)
 
 	if err != nil {
 		t.Fatal(err)
@@ -194,7 +194,7 @@ func TestCreate_InstanceAlreadyExistsButStopped_IsStarted_ThenReportsCreated(t *
 	p.CreateInstanceErr = api.StatusErrorf(http.StatusInternalServerError, `Instance "%s" already exists`, instanceName)
 	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName, StatusCode: api.Stopped}
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(nil), logger)
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(nil), logger)
 
 	if err != nil {
 		t.Fatal(err)
@@ -218,7 +218,7 @@ func TestCreate_OperationFailure_IsRetryable_AndReportsNothing(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.CreateInstanceErr = &provider.OperationFailedError{Status: "Failure", Message: "injected create failure"}
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(nil), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(nil), testsupport.DiscardLogger())
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want a retryable error, got %v", err)
@@ -233,7 +233,7 @@ func TestCreate_GiveUp_CarriesTheIdOfAnInstanceThatExists_AndASanitizedReason(t 
 	p := testsupport.NewProvider()
 	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName}
 
-	err := NewCreate(cp.Client(), zones(p)).GiveUp(context.Background(), createLeased(nil), errors.New("raw: pod worker-7 op 42"), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).GiveUp(context.Background(), createLeased(nil), errors.New("raw: pod worker-7 op 42"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestCreate_GiveUp_CarriesTheIdOfAnInstanceThatExists_AndASanitizedReason(t 
 
 func actionLeased(kind string) command.Leased {
 	return leased(kind, map[string]any{
-		"vmId": vmId, "intentId": intentId, "externalVmId": instanceName, "projectName": project, "zoneId": zoneId,
+		"vmId": vmId, "intentId": intentId, "externalVmId": instanceName, "projectName": project,
 	})
 }
 
@@ -256,7 +256,7 @@ func TestStop_AlreadyStopped_IsSuccess(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.UpdateStateErr = &provider.OperationFailedError{Status: "Failure", Message: "The instance is already stopped"}
 
-	err := NewStop(cp.Client(), zones(p)).Run(context.Background(), actionLeased("vm.stop"), logger)
+	err := NewStop(cp.Client(), clusters(p)).Run(context.Background(), actionLeased("vm.stop"), logger)
 
 	if err != nil {
 		t.Fatalf("want success, got %v", err)
@@ -276,7 +276,7 @@ func TestStart_AlreadyRunning_IsSuccess(t *testing.T) {
 	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName, StatusCode: api.Running}
 	p.UpdateStateErr = &provider.OperationFailedError{Status: "Failure", Message: "The instance is already running"}
 
-	err := NewStart(cp.Client(), zones(p)).Run(context.Background(), actionLeased("vm.start"), logger)
+	err := NewStart(cp.Client(), clusters(p)).Run(context.Background(), actionLeased("vm.start"), logger)
 
 	if err != nil {
 		t.Fatalf("want success, got %v", err)
@@ -293,7 +293,7 @@ func TestStart_FrozenInstance_IsUnfrozen(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName, StatusCode: api.Frozen}
 
-	err := NewStart(cp.Client(), zones(p)).Run(context.Background(), actionLeased("vm.start"), testsupport.DiscardLogger())
+	err := NewStart(cp.Client(), clusters(p)).Run(context.Background(), actionLeased("vm.start"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -308,7 +308,7 @@ func TestStart_StoppedInstance_IsStarted(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName, StatusCode: api.Stopped}
 
-	err := NewStart(cp.Client(), zones(p)).Run(context.Background(), actionLeased("vm.start"), testsupport.DiscardLogger())
+	err := NewStart(cp.Client(), clusters(p)).Run(context.Background(), actionLeased("vm.start"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -322,7 +322,7 @@ func TestStart_InstanceGone_IsPermanent(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewStart(cp.Client(), zones(p)).Run(context.Background(), actionLeased("vm.start"), testsupport.DiscardLogger())
+	err := NewStart(cp.Client(), clusters(p)).Run(context.Background(), actionLeased("vm.start"), testsupport.DiscardLogger())
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want a permanent error, got %v", err)
@@ -337,7 +337,7 @@ func TestStop_InjectedFailure_IsRetryable(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.UpdateStateErr = &provider.OperationFailedError{Status: "Failure", Message: "injected stop failure"}
 
-	err := NewStop(cp.Client(), zones(p)).Run(context.Background(), actionLeased("vm.stop"), testsupport.DiscardLogger())
+	err := NewStop(cp.Client(), clusters(p)).Run(context.Background(), actionLeased("vm.stop"), testsupport.DiscardLogger())
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -347,7 +347,7 @@ func TestStop_InjectedFailure_IsRetryable(t *testing.T) {
 func TestStop_GiveUp_WithdrawsTheIntent(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewStop(cp.Client(), zones(testsupport.NewProvider())).GiveUp(context.Background(), actionLeased("vm.stop"), errors.New("x"), testsupport.DiscardLogger())
+	err := NewStop(cp.Client(), clusters(testsupport.NewProvider())).GiveUp(context.Background(), actionLeased("vm.stop"), errors.New("x"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -359,7 +359,7 @@ func TestStop_GiveUp_WithdrawsTheIntent(t *testing.T) {
 }
 
 func deleteLeased() command.Leased {
-	return leased("vm.delete", map[string]any{"vmId": vmId, "externalVmId": instanceName, "projectName": project, "zoneId": zoneId})
+	return leased("vm.delete", map[string]any{"vmId": vmId, "externalVmId": instanceName, "projectName": project})
 }
 
 func TestDelete_InstanceGone_ReportsDeleted(t *testing.T) {
@@ -367,7 +367,7 @@ func TestDelete_InstanceGone_ReportsDeleted(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), deleteLeased(), logger)
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), deleteLeased(), logger)
 
 	if err != nil {
 		t.Fatal(err)
@@ -389,7 +389,7 @@ func TestDelete_RunningInstance_IsStoppedThenDeleted(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName, StatusCode: api.Running}
 
-	err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -408,7 +408,7 @@ func TestDelete_FrozenInstance_IsStoppedThenDeleted(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName, StatusCode: api.Frozen}
 
-	err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -425,7 +425,7 @@ func TestDelete_DeleteAnswers404_ReportsDeleted(t *testing.T) {
 	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName, StatusCode: api.Stopped}
 	p.DeleteInstanceErr = testsupport.NotFound("Instance not found")
 
-	err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -445,7 +445,7 @@ func TestDelete_DeleteRefused_IsRetryable_AndReportsNothing(t *testing.T) {
 	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName, StatusCode: api.Stopped}
 	p.DeleteInstanceErr = api.StatusErrorf(http.StatusInternalServerError, "injected delete failure")
 
-	err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -460,7 +460,7 @@ func TestDelete_DeleteRefused_IsRetryable_AndReportsNothing(t *testing.T) {
 func TestDelete_GiveUp_SendsNothing(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewDelete(cp.Client(), zones(testsupport.NewProvider())).GiveUp(context.Background(), deleteLeased(), errors.New("x"), testsupport.DiscardLogger())
+	err := NewDelete(cp.Client(), clusters(testsupport.NewProvider())).GiveUp(context.Background(), deleteLeased(), errors.New("x"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -473,7 +473,7 @@ func TestDelete_GiveUp_SendsNothing(t *testing.T) {
 func TestStart_GiveUp_WithdrawsTheIntent(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewStart(cp.Client(), zones(testsupport.NewProvider())).GiveUp(context.Background(), actionLeased("vm.start"), errors.New("x"), testsupport.DiscardLogger())
+	err := NewStart(cp.Client(), clusters(testsupport.NewProvider())).GiveUp(context.Background(), actionLeased("vm.start"), errors.New("x"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -484,7 +484,7 @@ func TestStart_GiveUp_WithdrawsTheIntent(t *testing.T) {
 	}
 }
 
-func TestCreate_ZoneWithoutCluster_IsPermanent(t *testing.T) {
+func TestCreate_ClusterNotConfigured_IsPermanent(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
 	err := NewCreate(cp.Client(), cluster.Fixed{}).Run(context.Background(), createLeased(nil), testsupport.DiscardLogger())
@@ -500,7 +500,7 @@ func TestCreate_WithoutANetwork_IsPermanent_AndCreatesNothing(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewCreate(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).Run(
+	err := NewCreate(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).Run(
 		context.Background(), createLeased(map[string]any{"externalNetworkId": ""}), testsupport.DiscardLogger())
 
 	if err == nil || command.IsRetryable(err) {

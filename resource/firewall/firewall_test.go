@@ -21,20 +21,20 @@ const (
 	otherRule = "99999999-8888-7777-6666-555555555555"
 	networkId = "11111111-2222-3333-4444-555555555555"
 	project   = "t-0123456789abcdef0123456789abcdef"
-	zoneId    = "mock"
+	clusterId = "mock"
 	aclName   = "acl-" + networkId
 )
 
 func leased(kind string, payload map[string]any) command.Leased {
 	encoded, _ := json.Marshal(payload)
-	return command.Leased{Kind: kind, ZoneId: zoneId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
+	return command.Leased{Kind: kind, ClusterId: clusterId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
 }
 
 func createPayload(id string, direction string, protocol string, startPort any, endPort any, cidr string) map[string]any {
 	return map[string]any{
 		"ruleId": id, "networkId": networkId, "direction": direction, "protocol": protocol,
 		"startPort": startPort, "endPort": endPort, "cidr": cidr, "externalNetworkId": "net-" + networkId,
-		"zoneId": zoneId, "projectName": project,
+		"projectName": project,
 	}
 }
 
@@ -44,7 +44,7 @@ func createLeased() command.Leased {
 
 func deleteLeased() command.Leased {
 	return leased("firewall-rule.delete", map[string]any{
-		"ruleId": ruleId, "networkId": networkId, "externalRuleId": aclName + "/" + ruleId, "zoneId": zoneId,
+		"ruleId": ruleId, "networkId": networkId, "externalRuleId": aclName + "/" + ruleId,
 		"projectName": project,
 	})
 }
@@ -72,8 +72,8 @@ func onlyBody(t *testing.T, cp *testsupport.ControlPlane, id string) map[string]
 	return body
 }
 
-func zones(p *testsupport.Provider) cluster.Fixed {
-	return cluster.Fixed{zoneId: {Provider: p}}
+func clusters(p *testsupport.Provider) cluster.Fixed {
+	return cluster.Fixed{clusterId: {Provider: p}}
 }
 
 func TestAclRule_MapsTitansRule(t *testing.T) {
@@ -161,7 +161,7 @@ func TestCreate_AddsTheRuleToTheNetworksAcl_AndReportsCreated(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl()
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -179,7 +179,7 @@ func TestCreate_AddsTheRuleToTheNetworksAcl_AndReportsCreated(t *testing.T) {
 func TestCreate_TwoRules_BothStay(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl()
-	create := NewCreate(cp.Client(), zones(p))
+	create := NewCreate(cp.Client(), clusters(p))
 
 	first := create.Run(context.Background(), createLeased(), testsupport.DiscardLogger())
 	second := create.Run(context.Background(), leased("firewall-rule.create", createPayload(otherRule, "Egress", "UDP", 53, 53, "10.40.0.0/24")), testsupport.DiscardLogger())
@@ -199,7 +199,7 @@ func TestCreate_RuleAlreadyThere_WritesNothing_AndReportsCreated(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl(api.NetworkACLRule{Action: "allow", Source: "10.40.0.0/24", Protocol: "tcp", DestinationPort: "22", Description: ruleId, State: "enabled"})
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(), logger)
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(), logger)
 
 	if err != nil {
 		t.Fatal(err)
@@ -220,7 +220,7 @@ func TestCreate_NetworkHasNoAcl_IsPermanent(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want permanent, got %v", err)
@@ -235,7 +235,7 @@ func TestCreate_AclChangedSinceTheRead_IsRetryable(t *testing.T) {
 	p := withAcl()
 	p.UpdateACLErr = api.StatusErrorf(http.StatusPreconditionFailed, "ETag doesn't match")
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -251,7 +251,7 @@ func TestCreate_AclWriteRefused_IsRetryable_AndReportsNothing(t *testing.T) {
 	p := withAcl()
 	p.UpdateACLErr = api.StatusErrorf(http.StatusInternalServerError, "injected firewall rule create failure")
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -267,7 +267,7 @@ func TestCreate_PayloadWithoutProject_IsPermanent(t *testing.T) {
 	payload := createPayload(ruleId, "Ingress", "TCP", 22, 22, "10.40.0.0/24")
 	delete(payload, "projectName")
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), leased("firewall-rule.create", payload), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), leased("firewall-rule.create", payload), testsupport.DiscardLogger())
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want permanent, got %v", err)
@@ -281,7 +281,7 @@ func TestCreate_GiveUp_ReportsRequestFailed_WithTheIdWhenTheRuleIsThere(t *testi
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl(api.NetworkACLRule{Action: "allow", Description: ruleId, State: "enabled"})
 
-	err := NewCreate(cp.Client(), zones(p)).GiveUp(context.Background(), createLeased(), errors.New("gave up"), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).GiveUp(context.Background(), createLeased(), errors.New("gave up"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -297,7 +297,7 @@ func TestCreate_GiveUp_RuleNotThere_ReportsWithoutAnId(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl()
 
-	err := NewCreate(cp.Client(), zones(p)).GiveUp(context.Background(), createLeased(), errors.New("gave up"), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).GiveUp(context.Background(), createLeased(), errors.New("gave up"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -315,7 +315,7 @@ func TestDelete_RemovesOnlyThatRule_AndReportsDeleted(t *testing.T) {
 		api.NetworkACLRule{Action: "allow", Description: otherRule, State: "enabled"},
 	)
 
-	err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -334,7 +334,7 @@ func TestDelete_RuleOrAclGone_ReportsDeleted_WithoutWriting(t *testing.T) {
 		cp := testsupport.NewControlPlane(t)
 		logger, logs := testsupport.NewLogCapture(t)
 
-		err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), deleteLeased(), logger)
+		err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), deleteLeased(), logger)
 
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -356,7 +356,7 @@ func TestDelete_WriteFails_DoesNotReportDeleted(t *testing.T) {
 	p := withAcl(api.NetworkACLRule{Action: "allow", Description: ruleId, State: "enabled"})
 	p.UpdateACLErr = errors.New("boom")
 
-	err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -369,9 +369,9 @@ func TestDelete_WriteFails_DoesNotReportDeleted(t *testing.T) {
 func TestDelete_BadProviderId_IsPermanent(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl()
-	payload := map[string]any{"ruleId": ruleId, "networkId": networkId, "externalRuleId": "no-slash", "zoneId": zoneId, "projectName": project}
+	payload := map[string]any{"ruleId": ruleId, "networkId": networkId, "externalRuleId": "no-slash", "projectName": project}
 
-	err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), leased("firewall-rule.delete", payload), testsupport.DiscardLogger())
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), leased("firewall-rule.delete", payload), testsupport.DiscardLogger())
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want permanent, got %v", err)
@@ -430,7 +430,7 @@ func TestDecideReport(t *testing.T) {
 
 func TestReconcile_SendsTheIncusStateAsIs_AndGoneAsNotFound(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond(http.MethodGet, "/internal/reconcile/firewall-rules?zoneId=mock", http.StatusOK,
+	cp.Respond(http.MethodGet, "/internal/reconcile/firewall-rules?clusterId=mock", http.StatusOK,
 		`[{"id":"`+ruleId+`","networkId":"`+networkId+`","externalId":"`+aclName+`/`+ruleId+`","currentState":null,"currentExistence":"Exists"},`+
 			`{"id":"`+otherRule+`","networkId":"`+networkId+`","externalId":"`+aclName+`/`+otherRule+`","currentState":"enabled","currentExistence":"Exists"}]`)
 	p := withAcl(api.NetworkACLRule{Action: "allow", Description: ruleId, State: "logged"})
@@ -464,7 +464,7 @@ func TestReconcile_SendsTheIncusStateAsIs_AndGoneAsNotFound(t *testing.T) {
 // delete waits is only not found; the delete command confirms it.
 func TestReconcile_RuleGone_NeverReportsDeleted(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond(http.MethodGet, "/internal/reconcile/firewall-rules?zoneId=mock", http.StatusOK,
+	cp.Respond(http.MethodGet, "/internal/reconcile/firewall-rules?clusterId=mock", http.StatusOK,
 		`[{"id":"`+ruleId+`","networkId":"`+networkId+`","externalId":"`+aclName+`/`+ruleId+`","currentState":"enabled","currentExistence":"Exists"}]`)
 	p := withAcl()
 
@@ -481,7 +481,7 @@ func TestReconcile_RuleGone_NeverReportsDeleted(t *testing.T) {
 // A failed read is not "no rule": reading it so would report every rule gone.
 func TestReconcile_AclReadFails_ReportsNothing(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond(http.MethodGet, "/internal/reconcile/firewall-rules?zoneId=mock", http.StatusOK,
+	cp.Respond(http.MethodGet, "/internal/reconcile/firewall-rules?clusterId=mock", http.StatusOK,
 		`[{"id":"`+ruleId+`","networkId":"`+networkId+`","externalId":"`+aclName+`/`+ruleId+`","currentState":"enabled","currentExistence":"Exists"}]`)
 	p := testsupport.NewProvider()
 	p.ListACLsErr = errors.New("boom")

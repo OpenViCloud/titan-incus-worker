@@ -1,4 +1,4 @@
-// Package firewall runs the firewall rule provider commands and the zone's firewall rule reconciler. A Titan rule is
+// Package firewall runs the firewall rule provider commands and the cluster's firewall rule reconciler. A Titan rule is
 // one entry of its network's ACL, found by its description (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/network/design.md#firewall-on-incus).
 package firewall
 

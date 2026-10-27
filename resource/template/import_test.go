@@ -85,16 +85,16 @@ func sha256Hex(content []byte) string {
 
 func importLeased(imageUrl string) command.Leased {
 	encoded, _ := json.Marshal(map[string]any{
-		"templateId": templateId, "zoneId": zoneId, "name": "Ubuntu-22.04-Standard", "description": "",
+		"templateId": templateId, "name": "Ubuntu-22.04-Standard", "description": "",
 		"osImageName": "ubuntu/22.04", "imageUrl": imageUrl, "rootDiskSizeGb": nil,
 	})
-	return command.Leased{Kind: "template.sync", ZoneId: zoneId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
+	return command.Leased{Kind: "template.sync", ClusterId: clusterId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
 }
 
 func runImport(t *testing.T, p *testsupport.Provider, imageUrl string) (*testsupport.ControlPlane, error) {
 	t.Helper()
 	cp := testsupport.NewControlPlane(t)
-	err := NewSync(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}, imageServer).
+	err := NewSync(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}, imageServer).
 		Run(context.Background(), importLeased(imageUrl), testsupport.DiscardLogger())
 	return cp, err
 }

@@ -15,18 +15,17 @@ type deletePayload struct {
 	NetworkId         string `json:"networkId"`
 	ExternalNetworkId string `json:"externalNetworkId"`
 	ProjectName       string `json:"projectName"`
-	ZoneId            string `json:"zoneId"`
 }
 
 // Delete runs network.delete. Giving up gives the network back to the tenant
 // (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#abandoned-request).
 type Delete struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewDelete(cp *controlplane.Client, zones cluster.Zones) *Delete {
-	return &Delete{cp: cp, zones: zones}
+func NewDelete(cp *controlplane.Client, clusters cluster.Clusters) *Delete {
+	return &Delete{cp: cp, clusters: clusters}
 }
 
 func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -38,11 +37,11 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if !isComplete {
 		return command.Permanent(errors.New("network.delete payload lacks networkId, externalNetworkId or projectName"))
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	err = zone.Provider.DeleteNetwork(ctx, payload.ProjectName, payload.ExternalNetworkId)
+	err = cl.Provider.DeleteNetwork(ctx, payload.ProjectName, payload.ExternalNetworkId)
 	isAlreadyGone := provider.IsNotFound(err)
 	if err != nil && !isAlreadyGone {
 		return err
@@ -52,7 +51,7 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	}
 	// Incus keeps the ACL after its network goes, and refuses to delete it while the network uses it: second.
 	aclName := provider.NetworkAclName(payload.NetworkId)
-	err = zone.Provider.DeleteNetworkACL(ctx, payload.ProjectName, aclName)
+	err = cl.Provider.DeleteNetworkACL(ctx, payload.ProjectName, aclName)
 	aclIsAlreadyGone := provider.IsNotFound(err)
 	if err != nil && !aclIsAlreadyGone {
 		return err

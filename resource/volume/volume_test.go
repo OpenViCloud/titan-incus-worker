@@ -21,28 +21,28 @@ const (
 	// Oracle: python3 base32 of volumeId, as in provider/names_test.go.
 	volumeName = "volceircejceiztgrcekvkvkvkvku"
 	project    = "t-0123456789abcdef0123456789abcdef"
-	zoneId     = "mock"
+	clusterId  = "mock"
 	instance   = "vmaaaa"
 )
 
-func zones(p *testsupport.Provider, pool string) cluster.Fixed {
-	return cluster.Fixed{zoneId: {Provider: p, StoragePool: pool}}
+func clusters(p *testsupport.Provider, pool string) cluster.Fixed {
+	return cluster.Fixed{clusterId: {Provider: p, StoragePool: pool}}
 }
 
 func leased(kind string, payload map[string]any) command.Leased {
 	encoded, _ := json.Marshal(payload)
-	return command.Leased{Kind: kind, ZoneId: zoneId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
+	return command.Leased{Kind: kind, ClusterId: clusterId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
 }
 
 func createLeased() command.Leased {
 	return leased("volume.create", map[string]any{
-		"volumeId": volumeId, "name": "data-1", "zoneId": zoneId, "sizeGb": 20, "projectName": project,
+		"volumeId": volumeId, "name": "data-1", "sizeGb": 20, "projectName": project,
 	})
 }
 
 func attachLeased(kind string) command.Leased {
 	return leased(kind, map[string]any{
-		"volumeId": volumeId, "externalVolumeId": volumeName, "externalVmId": instance, "projectName": project, "zoneId": zoneId,
+		"volumeId": volumeId, "externalVolumeId": volumeName, "externalVmId": instance, "projectName": project,
 	})
 }
 
@@ -77,7 +77,7 @@ func TestCreate_MakesTheBlockVolumeInTheTenantsProject_AndReportsCreatedWithItsN
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewCreate(cp.Client(), zones(p, "")).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p, "")).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func TestCreate_VolumeAlreadyThere_ReportsCreated(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.CreateVolumeErr = api.StatusErrorf(http.StatusConflict, "Volume by that name already exists")
 
-	err := NewCreate(cp.Client(), zones(p, "")).Run(context.Background(), createLeased(), logger)
+	err := NewCreate(cp.Client(), clusters(p, "")).Run(context.Background(), createLeased(), logger)
 
 	if err != nil {
 		t.Fatalf("a duplicate must not fail the create: %v", err)
@@ -126,7 +126,7 @@ func TestCreate_IncusError_FailsTheRunAndReportsNothing(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.CreateVolumeErr = api.StatusErrorf(http.StatusInternalServerError, "injected create failure")
 
-	err := NewCreate(cp.Client(), zones(p, "")).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p, "")).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want a retryable error, got %v", err)
@@ -138,9 +138,9 @@ func TestCreate_IncusError_FailsTheRunAndReportsNothing(t *testing.T) {
 
 func TestCreate_PayloadWithoutSize_IsPermanent(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	payload := leased("volume.create", map[string]any{"volumeId": volumeId, "name": "d", "zoneId": zoneId, "projectName": project})
+	payload := leased("volume.create", map[string]any{"volumeId": volumeId, "name": "d", "projectName": project})
 
-	err := NewCreate(cp.Client(), zones(testsupport.NewProvider(), "")).Run(context.Background(), payload, testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(testsupport.NewProvider(), "")).Run(context.Background(), payload, testsupport.DiscardLogger())
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want a permanent error, got %v", err)
@@ -156,7 +156,7 @@ func TestCreate_GiveUp_ReportsRequestFailed_CarryingTheNameOnlyWhenTheVolumeExis
 			p.Volumes[project+"/"+volumeName] = &api.StorageVolume{Name: volumeName}
 		}
 
-		err := NewCreate(cp.Client(), zones(p, "")).GiveUp(context.Background(), createLeased(), errors.New("raw: lvcreate failed"), testsupport.DiscardLogger())
+		err := NewCreate(cp.Client(), clusters(p, "")).GiveUp(context.Background(), createLeased(), errors.New("raw: lvcreate failed"), testsupport.DiscardLogger())
 
 		if err != nil {
 			t.Fatal(err)
@@ -181,12 +181,12 @@ func usedVolume(users ...string) *api.StorageVolume {
 
 // The attach reports what Incus then shows: the instances in the volume's used_by, for the control plane to match to
 // its VMs (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/volume/design.md#attachment-from-used-by).
-func TestAttach_PatchesADiskNamedAfterTheVolume_InTheZonesPool_AndReportsTheInstancesUsingIt(t *testing.T) {
+func TestAttach_PatchesADiskNamedAfterTheVolume_InTheClustersPool_AndReportsTheInstancesUsingIt(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.Volumes[project+"/"+volumeName] = usedVolume(usedByInstance)
 
-	err := NewAttach(cp.Client(), zones(p, "pool1")).Run(context.Background(), attachLeased("volume.attach"), testsupport.DiscardLogger())
+	err := NewAttach(cp.Client(), clusters(p, "pool1")).Run(context.Background(), attachLeased("volume.attach"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +210,7 @@ func TestAttach_VmGone_IsPermanent_AndGiveUpReportsRequestFailed_WithWhatIncusSh
 	p := testsupport.NewProvider()
 	p.PatchInstanceErr = testsupport.NotFound("Instance not found")
 	p.Volumes[project+"/"+volumeName] = usedVolume()
-	handler := NewAttach(cp.Client(), zones(p, ""))
+	handler := NewAttach(cp.Client(), clusters(p, ""))
 
 	err := handler.Run(context.Background(), attachLeased("volume.attach"), testsupport.DiscardLogger())
 	if err == nil || command.IsRetryable(err) {
@@ -240,7 +240,7 @@ func TestDetach_RemovesOnlyThisVolumesDisk_FromTheInstanceUsingIt_AndReportsWhat
 	// Incus drops the instance from used_by once its device is gone; the fake volume does not follow by itself.
 	p.AfterUpdateInstance = func() { p.Volumes[project+"/"+volumeName] = usedVolume() }
 
-	err := NewDetach(cp.Client(), zones(p, "")).Run(context.Background(), attachLeased("volume.detach"), testsupport.DiscardLogger())
+	err := NewDetach(cp.Client(), clusters(p, "")).Run(context.Background(), attachLeased("volume.detach"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -267,7 +267,7 @@ func TestDetach_VolumeUsedByNoInstance_ReportsItUnattachedWithoutAPut(t *testing
 	p := testsupport.NewProvider()
 	p.Volumes[project+"/"+volumeName] = usedVolume()
 
-	err := NewDetach(cp.Client(), zones(p, "")).Run(context.Background(), attachLeased("volume.detach"), testsupport.DiscardLogger())
+	err := NewDetach(cp.Client(), clusters(p, "")).Run(context.Background(), attachLeased("volume.detach"), testsupport.DiscardLogger())
 
 	if err != nil || len(p.UpdatedInstances) != 0 {
 		t.Fatalf("err %v, PUTs %+v", err, p.UpdatedInstances)
@@ -296,9 +296,9 @@ func TestGiveUps_CarryWhatTheVolumesUsedByShows(t *testing.T) {
 		cp := testsupport.NewControlPlane(t)
 		p := testsupport.NewProvider()
 		p.Volumes[project+"/"+volumeName] = usedVolume(c.usedBy...)
-		var handler command.Handler = NewAttach(cp.Client(), zones(p, ""))
+		var handler command.Handler = NewAttach(cp.Client(), clusters(p, ""))
 		if c.kind == "volume.detach" {
-			handler = NewDetach(cp.Client(), zones(p, ""))
+			handler = NewDetach(cp.Client(), clusters(p, ""))
 		}
 
 		err := handler.GiveUp(context.Background(), attachLeased(c.kind), errors.New("callback refused"), testsupport.DiscardLogger())
@@ -321,7 +321,7 @@ func TestGiveUp_UnreadableVolume_ReportsTheFailureAlone(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.GetVolumeErr = errors.New("connection refused")
 
-	err := NewDetach(cp.Client(), zones(p, "")).GiveUp(context.Background(), attachLeased("volume.detach"), errors.New("x"), testsupport.DiscardLogger())
+	err := NewDetach(cp.Client(), clusters(p, "")).GiveUp(context.Background(), attachLeased("volume.detach"), errors.New("x"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -337,7 +337,7 @@ func TestGiveUp_UnreadableVolume_ReportsTheFailureAlone(t *testing.T) {
 func TestGiveUp_VolumeGone_ReportsItNotFound(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewDetach(cp.Client(), zones(testsupport.NewProvider(), "")).GiveUp(context.Background(), attachLeased("volume.detach"), errors.New("x"), testsupport.DiscardLogger())
+	err := NewDetach(cp.Client(), clusters(testsupport.NewProvider(), "")).GiveUp(context.Background(), attachLeased("volume.detach"), errors.New("x"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -364,7 +364,7 @@ func TestInstancesUsing_ReadsInstancesAndTheirProject_SkipsEverythingElse(t *tes
 
 func deleteLeased() command.Leased {
 	return leased("volume.delete", map[string]any{
-		"volumeId": volumeId, "externalVolumeId": volumeName, "projectName": project, "zoneId": zoneId,
+		"volumeId": volumeId, "externalVolumeId": volumeName, "projectName": project,
 	})
 }
 
@@ -374,7 +374,7 @@ func TestDelete_VolumeAlreadyGone_ReportsDeleted(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.DeleteVolumeErr = testsupport.NotFound("Storage pool volume not found")
 
-	err := NewDelete(cp.Client(), zones(p, "")).Run(context.Background(), deleteLeased(), logger)
+	err := NewDelete(cp.Client(), clusters(p, "")).Run(context.Background(), deleteLeased(), logger)
 
 	if err != nil || onlyBody(t, cp, statusPath)["report"] != "Deleted" {
 		t.Fatalf("err %v", err)
@@ -388,7 +388,7 @@ func TestDelete_StillInUse_IsRetried_AndGiveUpReportsRequestFailed(t *testing.T)
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.DeleteVolumeErr = api.StatusErrorf(http.StatusBadRequest, "The storage volume is still in use")
-	handler := NewDelete(cp.Client(), zones(p, ""))
+	handler := NewDelete(cp.Client(), clusters(p, ""))
 
 	err := handler.Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
 	if err == nil || !command.IsRetryable(err) {
@@ -487,7 +487,7 @@ func TestDecideSnapshotReport(t *testing.T) {
 // (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#existence-axis).
 func TestReconcile_ReadsTheSnapshotsOfAVolumeOnce_AndReportsEachChange_NeverDeleted(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond("GET", "/internal/reconcile/volumes?zoneId=mock", 200, `{
+	cp.Respond("GET", "/internal/reconcile/volumes?clusterId=mock", 200, `{
 		"volumes":[
 			{"id":"v1","externalId":"vola","currentExistence":"NotCreated","currentAttachedExternalVmId":null,"currentAttachedElsewhere":false},
 			{"id":"v2","externalId":"volgone","currentExistence":"Exists","currentAttachedExternalVmId":null,"currentAttachedElsewhere":false}],
@@ -499,7 +499,7 @@ func TestReconcile_ReadsTheSnapshotsOfAVolumeOnce_AndReportsEachChange_NeverDele
 	p.VolumeSnapshots[project+"/vola/sone"] = true
 	logger, logs := testsupport.NewLogCapture(t)
 
-	err := Reconcile(context.Background(), cp.Client(), p, zoneId, "", logger)
+	err := Reconcile(context.Background(), cp.Client(), p, clusterId, "", logger)
 
 	if err != nil {
 		t.Fatal(err)
@@ -556,12 +556,12 @@ func TestReconcile_ReadsTheSnapshotsOfAVolumeOnce_AndReportsEachChange_NeverDele
 
 func TestReconcile_FailedPoolRead_ReportsNothing(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond("GET", "/internal/reconcile/volumes?zoneId=mock", 200,
+	cp.Respond("GET", "/internal/reconcile/volumes?clusterId=mock", 200,
 		`{"volumes":[{"id":"v1","externalId":"vola","currentExistence":"Exists"}],"snapshots":[]}`)
 	p := testsupport.NewProvider()
 	p.ListVolumesErr = errors.New("connection refused")
 
-	err := Reconcile(context.Background(), cp.Client(), p, zoneId, "", slog.Default())
+	err := Reconcile(context.Background(), cp.Client(), p, clusterId, "", slog.Default())
 
 	if err == nil || len(cp.RequestsTo("PATCH")) != 0 {
 		t.Fatalf("err %v, reports %+v", err, cp.RequestsTo("PATCH"))

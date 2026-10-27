@@ -24,7 +24,7 @@ const (
 	volumeName   = "volsource"
 	tenantId     = "0123abcd-0000-4000-8000-000000000001"
 	project      = "t-0123abcd000040008000000000000001"
-	zoneId       = "mock"
+	clusterId    = "mock"
 	pool         = "default"
 )
 
@@ -37,13 +37,13 @@ var target = Target{
 	SecretAccessKey: "secret-key",
 }
 
-func zones(p *testsupport.Provider) cluster.Fixed {
-	return cluster.Fixed{zoneId: {Provider: p}}
+func clusters(p *testsupport.Provider) cluster.Fixed {
+	return cluster.Fixed{clusterId: {Provider: p}}
 }
 
 func leased(kind string, payload map[string]any) command.Leased {
 	encoded, _ := json.Marshal(payload)
-	return command.Leased{Kind: kind, ZoneId: zoneId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
+	return command.Leased{Kind: kind, ClusterId: clusterId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
 }
 
 func vmLeased() command.Leased {
@@ -92,14 +92,14 @@ func newVm(p *testsupport.Provider, configured Target) *Vm {
 }
 
 func newVmWith(p *testsupport.Provider, configured Target, objects *fakeObjects) *Vm {
-	h := NewVm(zones(p), configured, objects)
+	h := NewVm(clusters(p), configured, objects)
 	h.now = func() time.Time { return takenAt }
 	h.arrival = quickArrival
 	return h
 }
 
 func newVolume(p *testsupport.Provider, configured Target) *Volume {
-	h := NewVolume(zones(p), configured, arrived())
+	h := NewVolume(clusters(p), configured, arrived())
 	h.now = func() time.Time { return takenAt }
 	h.arrival = quickArrival
 	return h
@@ -334,7 +334,7 @@ func TestVm_BucketUnreadable_IsRetryable(t *testing.T) {
 func TestVolume_ObjectNeverArrives_IsRetryable(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.Volumes[project+"/"+volumeName] = &api.StorageVolume{Name: volumeName, Type: "custom", Project: project}
-	h := NewVolume(zones(p), target, &fakeObjects{answers: []bool{false}})
+	h := NewVolume(clusters(p), target, &fakeObjects{answers: []bool{false}})
 	h.now = func() time.Time { return takenAt }
 	h.arrival = quickArrival
 

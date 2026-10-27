@@ -1,4 +1,4 @@
-// Package cluster resolves a zone to a connected Incus cluster through the control plane
+// Package cluster connects to an Incus cluster by its id, reading the connection from the control plane
 // (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/cluster/design.md#worker-cluster-connection), caching the connection for a few minutes.
 package cluster
 
@@ -15,13 +15,14 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 )
 
-// ErrNoCluster: the zone has no cluster row (404 CLUSTER_NOT_FOUND). A command for it cannot succeed by retrying.
+// ErrNoCluster: the control plane configures no cluster of that id (404 CLUSTER_NOT_FOUND). A command for it cannot
+// succeed by retrying.
 var ErrNoCluster error = &noClusterError{}
 
 type noClusterError struct{}
 
 func (e *noClusterError) Error() string {
-	return "zone has no cluster"
+	return "cluster not configured"
 }
 
 // Permanent tells the command loop not to retry, without this package importing it.
@@ -31,8 +32,8 @@ func (e *noClusterError) Permanent() bool {
 
 const cacheFor = 5 * time.Minute
 
-// Zone is one connected cluster with the zone's provider settings ("" = not set).
-type Zone struct {
+// Cluster is one connected cluster with its provider settings ("" = not set).
+type Cluster struct {
 	Provider         provider.Provider
 	OvnUplinkNetwork string
 	StoragePool      string
@@ -48,20 +49,20 @@ type connectionResponse struct {
 	StoragePool          *string `json:"storagePool"`
 }
 
-// Zones resolves a zone to its cluster; Resolver in production, Fixed in tests.
-type Zones interface {
-	Zone(ctx context.Context, zoneId string) (*Zone, error)
+// Clusters resolves a cluster id to a connected cluster; Resolver in production, Fixed in tests.
+type Clusters interface {
+	Cluster(ctx context.Context, clusterId string) (*Cluster, error)
 }
 
-// Fixed serves preset zones; any other zone has no cluster.
-type Fixed map[string]*Zone
+// Fixed serves preset clusters; any other id is not configured.
+type Fixed map[string]*Cluster
 
-func (f Fixed) Zone(ctx context.Context, zoneId string) (*Zone, error) {
-	zone, found := f[zoneId]
+func (f Fixed) Cluster(ctx context.Context, clusterId string) (*Cluster, error) {
+	cl, found := f[clusterId]
 	if !found {
-		return nil, fmt.Errorf("zone %s: %w", zoneId, ErrNoCluster)
+		return nil, fmt.Errorf("cluster %s: %w", clusterId, ErrNoCluster)
 	}
-	return zone, nil
+	return cl, nil
 }
 
 type ConnectFunc func(provider.Credentials) (provider.Provider, error)
@@ -76,7 +77,7 @@ func ConnectIncus(credentials provider.Credentials) (provider.Provider, error) {
 }
 
 type cached struct {
-	zone      *Zone
+	cl        *Cluster
 	expiresAt time.Time
 }
 
@@ -86,42 +87,43 @@ type Resolver struct {
 	logger  *slog.Logger
 	now     func() time.Time
 
-	mu    sync.Mutex
-	zones map[string]cached
+	mu       sync.Mutex
+	clusters map[string]cached
 }
 
 func NewResolver(cp *controlplane.Client, connect ConnectFunc, logger *slog.Logger) *Resolver {
-	return &Resolver{cp: cp, connect: connect, logger: logger, now: time.Now, zones: map[string]cached{}}
+	return &Resolver{cp: cp, connect: connect, logger: logger, now: time.Now, clusters: map[string]cached{}}
 }
 
-// Zone returns the zone's cluster, connecting on a cache miss. errors.Is(err, ErrNoCluster) when the zone has none.
-func (r *Resolver) Zone(ctx context.Context, zoneId string) (*Zone, error) {
+// Cluster returns the connected cluster, connecting on a cache miss. errors.Is(err, ErrNoCluster) when the control
+// plane configures none of that id.
+func (r *Resolver) Cluster(ctx context.Context, clusterId string) (*Cluster, error) {
 	r.mu.Lock()
-	entry, found := r.zones[zoneId]
+	entry, found := r.clusters[clusterId]
 	r.mu.Unlock()
 	isFresh := found && r.now().Before(entry.expiresAt)
 	if isFresh {
-		return entry.zone, nil
+		return entry.cl, nil
 	}
 
-	zone, err := r.load(ctx, zoneId)
+	cl, err := r.load(ctx, clusterId)
 	if err != nil {
 		return nil, err
 	}
 	r.mu.Lock()
-	r.zones[zoneId] = cached{zone: zone, expiresAt: r.now().Add(cacheFor)}
+	r.clusters[clusterId] = cached{cl: cl, expiresAt: r.now().Add(cacheFor)}
 	r.mu.Unlock()
-	return zone, nil
+	return cl, nil
 }
 
-func (r *Resolver) load(ctx context.Context, zoneId string) (*Zone, error) {
+func (r *Resolver) load(ctx context.Context, clusterId string) (*Cluster, error) {
 	var connection connectionResponse
-	err := r.cp.GetJSON(ctx, "/internal/clusters/"+url.PathEscape(zoneId)+"/connection", &connection)
+	err := r.cp.GetJSON(ctx, "/internal/clusters/"+url.PathEscape(clusterId)+"/connection", &connection)
 	if controlplane.StatusCodeOf(err) == http.StatusNotFound {
-		return nil, fmt.Errorf("zone %s: %w (%w)", zoneId, ErrNoCluster, err)
+		return nil, fmt.Errorf("cluster %s: %w (%w)", clusterId, ErrNoCluster, err)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read cluster connection of zone %s: %w", zoneId, err)
+		return nil, fmt.Errorf("read the connection of cluster %s: %w", clusterId, err)
 	}
 
 	connected, err := r.connect(provider.Credentials{
@@ -131,12 +133,12 @@ func (r *Resolver) load(ctx context.Context, zoneId string) (*Zone, error) {
 		ClientKeyPem:         connection.ClientKeyPem,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("zone %s: %w", zoneId, err)
+		return nil, fmt.Errorf("cluster %s: %w", clusterId, err)
 	}
 	// The connection is kept for cacheFor: a cluster re-trusted or moved meanwhile is reached only after it runs out.
-	r.logger.Info("connected to the zone's cluster", "zoneId", zoneId, "endpoint", connection.Endpoint,
+	r.logger.Info("connected to the cluster", "clusterId", clusterId, "endpoint", connection.Endpoint,
 		"cachedFor", cacheFor.String())
-	return &Zone{
+	return &Cluster{
 		Provider:         connected,
 		OvnUplinkNetwork: valueOrEmpty(connection.OvnUplinkNetwork),
 		StoragePool:      valueOrEmpty(connection.StoragePool),

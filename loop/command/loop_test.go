@@ -53,7 +53,7 @@ func newTestLoop(cp *testsupport.ControlPlane, handler *fakeHandler) *Loop {
 
 func leasedJSON(attempt int, maxAttempts int) string {
 	encoded, _ := json.Marshal(map[string]any{
-		"id": "c1", "key": "vm-provision-x", "kind": "vm.create", "zoneId": "mock",
+		"id": "c1", "key": "vm-provision-x", "kind": "vm.create", "clusterId": "mock",
 		"payload": map[string]any{"vmId": "x"}, "attempt": attempt, "maxAttempts": maxAttempts,
 		"leaseUntil": "2026-10-08T00:00:00Z",
 	})

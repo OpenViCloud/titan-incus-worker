@@ -21,12 +21,12 @@ type deletePayload struct {
 // Delete runs load-balancer.delete: the VIP leaves its network; one already gone is done. Only this command reports
 // Deleted (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#forget-on-provider-confirm).
 type Delete struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewDelete(cp *controlplane.Client, zones cluster.Zones) *Delete {
-	return &Delete{cp: cp, zones: zones}
+func NewDelete(cp *controlplane.Client, clusters cluster.Clusters) *Delete {
+	return &Delete{cp: cp, clusters: clusters}
 }
 
 func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -38,11 +38,11 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if !isComplete {
 		return command.Permanent(errors.New("load-balancer.delete payload lacks loadBalancerId, projectName, externalNetworkId or vip"))
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	err = zone.Provider.DeleteNetworkLoadBalancer(ctx, payload.ProjectName, payload.ExternalNetworkId, payload.Vip)
+	err = cl.Provider.DeleteNetworkLoadBalancer(ctx, payload.ProjectName, payload.ExternalNetworkId, payload.Vip)
 	alreadyGone := provider.IsNotFound(err)
 	if err != nil && !alreadyGone {
 		return err

@@ -20,7 +20,7 @@ const (
 	loadBalancerId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	intentId       = "11111111-2222-3333-4444-555555555555"
 	project        = "t-0123456789abcdef0123456789abcdef"
-	zoneId         = "local-mac"
+	clusterId      = "local-mac"
 	network        = "net-99999999-8888-7777-6666-555555555555"
 	subnet         = "2001:db8:42:101::/64"
 	vip            = "2001:db8:42:101::1:1"
@@ -37,12 +37,12 @@ var discard = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func leased(kind string, payload map[string]any) command.Leased {
 	encoded, _ := json.Marshal(payload)
-	return command.Leased{Kind: kind, ZoneId: zoneId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
+	return command.Leased{Kind: kind, ClusterId: clusterId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
 }
 
 func specFields() map[string]any {
 	return map[string]any{
-		"loadBalancerId": loadBalancerId, "projectName": project, "zoneId": zoneId, "externalNetworkId": network,
+		"loadBalancerId": loadBalancerId, "projectName": project, "externalNetworkId": network,
 		"publicIpv6Subnet": subnet, "vip": vip,
 		"listeners": []map[string]any{
 			{"protocol": "tcp", "port": 80, "targetPort": 8080},
@@ -63,7 +63,7 @@ func updateFields() map[string]any {
 
 func deleteFields() map[string]any {
 	return map[string]any{
-		"loadBalancerId": loadBalancerId, "projectName": project, "zoneId": zoneId, "externalNetworkId": network, "vip": vip,
+		"loadBalancerId": loadBalancerId, "projectName": project, "externalNetworkId": network, "vip": vip,
 	}
 }
 
@@ -74,8 +74,8 @@ func withVms() *testsupport.Provider {
 	return p
 }
 
-func zones(p *testsupport.Provider) cluster.Fixed {
-	return cluster.Fixed{zoneId: {Provider: p}}
+func clusters(p *testsupport.Provider) cluster.Fixed {
+	return cluster.Fixed{clusterId: {Provider: p}}
 }
 
 func reports(t *testing.T, cp *testsupport.ControlPlane, id string) []map[string]any {
@@ -122,7 +122,7 @@ func TestCreate_PostsOneBackendPerListenerAndVm_WithHealthCheck_AndReportsCreate
 	p := withVms()
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), leased("load-balancer.create", specFields()), discard)
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.create", specFields()), discard)
 
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestCreate_WhenIncusAlreadyHasTheVip_PutsIt_AndStillReportsCreated(t *testi
 	p.PutLoadBalancer(project, network, api.NetworkLoadBalancer{ListenAddress: vip})
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), leased("load-balancer.create", specFields()), discard)
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.create", specFields()), discard)
 
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +192,7 @@ func TestCreate_ABackendWhoseInstanceIsGone_IsPermanent_AndWritesNothing(t *test
 	delete(p.Instances, project+"/"+vmB)
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), leased("load-balancer.create", specFields()), discard)
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.create", specFields()), discard)
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want permanent, got %v", err)
@@ -208,7 +208,7 @@ func TestCreate_ABackendWithNoMacYet_IsRetryable(t *testing.T) {
 	p.Instances[project+"/"+vmB].Config = map[string]string{}
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), leased("load-balancer.create", specFields()), discard)
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.create", specFields()), discard)
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want a retryable error, got %v", err)
@@ -221,7 +221,7 @@ func TestCreate_APayloadMissingTheVip_IsPermanent_AndTouchesNothing(t *testing.T
 	delete(payload, "vip")
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), leased("load-balancer.create", payload), discard)
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.create", payload), discard)
 
 	if err == nil || command.IsRetryable(err) || p.Calls != 0 {
 		t.Fatalf("err %v, provider calls %d", err, p.Calls)
@@ -233,7 +233,7 @@ func TestCreate_GiveUp_WithTheVipOnIncus_SaysTheCreateHappened(t *testing.T) {
 	p.PutLoadBalancer(project, network, api.NetworkLoadBalancer{ListenAddress: vip})
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewCreate(cp.Client(), zones(p)).GiveUp(context.Background(), leased("load-balancer.create", specFields()), errors.New("boom"), discard)
+	err := NewCreate(cp.Client(), clusters(p)).GiveUp(context.Background(), leased("load-balancer.create", specFields()), errors.New("boom"), discard)
 
 	if err != nil {
 		t.Fatal(err)
@@ -248,7 +248,7 @@ func TestCreate_GiveUp_WithNothingOnIncus_SendsNoId(t *testing.T) {
 	p := withVms()
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewCreate(cp.Client(), zones(p)).GiveUp(context.Background(), leased("load-balancer.create", specFields()), errors.New("boom"), discard)
+	err := NewCreate(cp.Client(), clusters(p)).GiveUp(context.Background(), leased("load-balancer.create", specFields()), errors.New("boom"), discard)
 
 	if err != nil {
 		t.Fatal(err)
@@ -265,7 +265,7 @@ func TestUpdate_PutsTheWholeSpec_AndReportsUpdatedWithItsIntent(t *testing.T) {
 	p.PutLoadBalancer(project, network, api.NetworkLoadBalancer{ListenAddress: vip})
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewUpdate(cp.Client(), zones(p)).Run(context.Background(), leased("load-balancer.update", updateFields()), discard)
+	err := NewUpdate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.update", updateFields()), discard)
 
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +284,7 @@ func TestUpdate_WhenTheVipIsGone_CreatesIt(t *testing.T) {
 	p := withVms()
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewUpdate(cp.Client(), zones(p)).Run(context.Background(), leased("load-balancer.update", updateFields()), discard)
+	err := NewUpdate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.update", updateFields()), discard)
 
 	if err != nil {
 		t.Fatal(err)
@@ -298,7 +298,7 @@ func TestUpdate_WithoutAnIntent_IsPermanent(t *testing.T) {
 	p := withVms()
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewUpdate(cp.Client(), zones(p)).Run(context.Background(), leased("load-balancer.update", specFields()), discard)
+	err := NewUpdate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.update", specFields()), discard)
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want permanent, got %v", err)
@@ -309,7 +309,7 @@ func TestUpdate_GiveUp_NamesItsIntent(t *testing.T) {
 	p := withVms()
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewUpdate(cp.Client(), zones(p)).GiveUp(context.Background(), leased("load-balancer.update", updateFields()), errors.New("boom"), discard)
+	err := NewUpdate(cp.Client(), clusters(p)).GiveUp(context.Background(), leased("load-balancer.update", updateFields()), errors.New("boom"), discard)
 
 	if err != nil {
 		t.Fatal(err)
@@ -327,7 +327,7 @@ func TestDelete_RemovesTheVip_AndReportsDeleted(t *testing.T) {
 	p.PutLoadBalancer(project, network, api.NetworkLoadBalancer{ListenAddress: vip})
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), leased("load-balancer.delete", deleteFields()), discard)
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.delete", deleteFields()), discard)
 
 	if err != nil {
 		t.Fatal(err)
@@ -341,7 +341,7 @@ func TestDelete_AlreadyGone_StillReportsDeleted(t *testing.T) {
 	p := withVms()
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), leased("load-balancer.delete", deleteFields()), discard)
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.delete", deleteFields()), discard)
 
 	if err != nil || onlyReport(t, cp)["report"] != "Deleted" {
 		t.Fatalf("err %v requests %+v", err, cp.Requests())
@@ -354,7 +354,7 @@ func TestDelete_IncusRefuses_ReportsNothing_AndIsRetried(t *testing.T) {
 	p.DeleteLoadBalancerErr = api.StatusErrorf(http.StatusInternalServerError, "busy")
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), leased("load-balancer.delete", deleteFields()), discard)
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.delete", deleteFields()), discard)
 
 	if err == nil || !command.IsRetryable(err) || len(reports(t, cp, loadBalancerId)) != 0 {
 		t.Fatalf("err %v, requests %+v", err, cp.Requests())
@@ -364,7 +364,7 @@ func TestDelete_IncusRefuses_ReportsNothing_AndIsRetried(t *testing.T) {
 func TestDelete_GiveUp_ReportsTheFailure(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewDelete(cp.Client(), zones(withVms())).GiveUp(context.Background(), leased("load-balancer.delete", deleteFields()), errors.New("boom"), discard)
+	err := NewDelete(cp.Client(), clusters(withVms())).GiveUp(context.Background(), leased("load-balancer.delete", deleteFields()), errors.New("boom"), discard)
 
 	if err != nil {
 		t.Fatal(err)
@@ -398,9 +398,9 @@ func TestReconcile_ReportsOnlyWhatDiffers_AbsentIsNotFound(t *testing.T) {
 		{Id: orphaned, ProjectName: project, ExternalNetworkId: gone, Vip: "2001:db8:42:103::1:1", CurrentExistence: "Exists"},
 	}
 	encoded, _ := json.Marshal(rows)
-	cp.Respond("GET", "/internal/reconcile/load-balancers?zoneId="+zoneId, http.StatusOK, string(encoded))
+	cp.Respond("GET", "/internal/reconcile/load-balancers?clusterId="+clusterId, http.StatusOK, string(encoded))
 
-	if err := Reconcile(context.Background(), cp.Client(), p, zoneId, discard); err != nil {
+	if err := Reconcile(context.Background(), cp.Client(), p, clusterId, discard); err != nil {
 		t.Fatal(err)
 	}
 
@@ -422,9 +422,9 @@ func TestReconcile_AFailedListOfOneNetwork_ReportsNothingForIt(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	rows := []ReconcilableLoadBalancer{{Id: loadBalancerId, ProjectName: project, ExternalNetworkId: network, Vip: vip, CurrentExistence: "Exists"}}
 	encoded, _ := json.Marshal(rows)
-	cp.Respond("GET", "/internal/reconcile/load-balancers?zoneId="+zoneId, http.StatusOK, string(encoded))
+	cp.Respond("GET", "/internal/reconcile/load-balancers?clusterId="+clusterId, http.StatusOK, string(encoded))
 
-	if err := Reconcile(context.Background(), cp.Client(), p, zoneId, discard); err != nil {
+	if err := Reconcile(context.Background(), cp.Client(), p, clusterId, discard); err != nil {
 		t.Fatal(err)
 	}
 	if len(reports(t, cp, loadBalancerId)) != 0 {
