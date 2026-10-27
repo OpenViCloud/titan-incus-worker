@@ -32,19 +32,19 @@ type ReconcilableVm struct {
 	PublicIpv6Address string  `json:"publicIpv6Address"`
 }
 
-// Reconcile observes one zone's VMs and reports what differs. It never acts on Incus. A failed read skips the cycle:
+// Reconcile observes one cluster's VMs and reports what differs. It never acts on Incus. A failed read skips the cycle:
 // reading it as "no instance" would report every VM lost.
-func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, zoneId string, logger *slog.Logger) error {
+func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error {
 	var rows []ReconcilableVm
-	if err := cp.GetJSON(ctx, "/internal/reconcile/vms?zoneId="+url.QueryEscape(zoneId), &rows); err != nil {
-		return fmt.Errorf("list reconcilable VMs of zone %s: %w", zoneId, err)
+	if err := cp.GetJSON(ctx, "/internal/reconcile/vms?clusterId="+url.QueryEscape(clusterId), &rows); err != nil {
+		return fmt.Errorf("list reconcilable VMs of cluster %s: %w", clusterId, err)
 	}
 	if len(rows) == 0 {
 		return nil
 	}
 	instances, err := p.ListVirtualMachinesAllProjects(ctx)
 	if err != nil {
-		return fmt.Errorf("observe VMs of zone %s: %w", zoneId, err)
+		return fmt.Errorf("observe VMs of cluster %s: %w", clusterId, err)
 	}
 	byName := map[string]api.InstanceFull{}
 	for _, instance := range instances {

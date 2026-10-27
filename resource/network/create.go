@@ -55,7 +55,6 @@ type createPayload struct {
 	NetworkId            string `json:"networkId"`
 	Name                 string `json:"name"`
 	ProjectName          string `json:"projectName"`
-	ZoneId               string `json:"zoneId"`
 	Cidr                 string `json:"cidr"`
 	DefaultIngressPolicy string `json:"defaultIngressPolicy"`
 	DefaultEgressPolicy  string `json:"defaultEgressPolicy"`
@@ -67,12 +66,12 @@ type createPayload struct {
 // Create runs network.create: the network's ACL, then an isolated OVN network in the tenant's project that carries
 // it. It reports the provider id (Created); the reconciler reports Active.
 type Create struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewCreate(cp *controlplane.Client, zones cluster.Zones) *Create {
-	return &Create{cp: cp, zones: zones}
+func NewCreate(cp *controlplane.Client, clusters cluster.Clusters) *Create {
+	return &Create{cp: cp, clusters: clusters}
 }
 
 func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -92,22 +91,22 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return command.Permanent(err)
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	request, err := NetworkRequest(payload, address.Cidr, defaultAction, zone.OvnUplinkNetwork, publicIpv6)
+	request, err := NetworkRequest(payload, address.Cidr, defaultAction, cl.OvnUplinkNetwork, publicIpv6)
 	if err != nil {
-		return command.Permanent(fmt.Errorf("zone %s: %w", leased.ZoneId, err))
+		return command.Permanent(fmt.Errorf("cluster %s: %w", leased.ClusterId, err))
 	}
-	if err := provider.EnsureProject(ctx, zone.Provider, payload.ProjectName); err != nil {
+	if err := provider.EnsureProject(ctx, cl.Provider, payload.ProjectName); err != nil {
 		return err
 	}
 
 	// The ACL first: a network cannot name an ACL that does not exist. Already there: an earlier run made it; the
 	// name is ours.
 	acl := api.NetworkACLsPost{NetworkACLPost: api.NetworkACLPost{Name: provider.NetworkAclName(payload.NetworkId)}}
-	err = zone.Provider.CreateNetworkACL(ctx, payload.ProjectName, acl)
+	err = cl.Provider.CreateNetworkACL(ctx, payload.ProjectName, acl)
 	aclIsOurs := err != nil && provider.IsAclAlreadyExists(err)
 	if err != nil && !aclIsOurs {
 		return err
@@ -116,7 +115,7 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 		logger.Info("already exists; treating it as ours", "object", acl.Name)
 	}
 
-	err = zone.Provider.CreateNetwork(ctx, payload.ProjectName, request)
+	err = cl.Provider.CreateNetwork(ctx, payload.ProjectName, request)
 	// 409: an earlier run made it; the name is ours, but that run may have made it with other ACL settings.
 	isOurs := err != nil && provider.IsConflict(err)
 	if err != nil && !isOurs {
@@ -124,11 +123,11 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	}
 	if isOurs {
 		logger.Info("already exists; treating it as ours", "object", request.Name)
-		if err := ensureAclSettings(ctx, zone.Provider, payload.ProjectName, request); err != nil {
+		if err := ensureAclSettings(ctx, cl.Provider, payload.ProjectName, request); err != nil {
 			return err
 		}
 	}
-	if err := checkPublicIpv6(ctx, zone.Provider, payload.ProjectName, request.Name, zone.OvnUplinkNetwork, publicIpv6); err != nil {
+	if err := checkPublicIpv6(ctx, cl.Provider, payload.ProjectName, request.Name, cl.OvnUplinkNetwork, publicIpv6); err != nil {
 		return err
 	}
 	report := statusReport{
@@ -140,7 +139,7 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	// Titan chose no CIDR: Incus picked one ("auto"); read it back so Titan records the subnet the VMs get.
 	cidrWasChosenByIncus := payload.Cidr == ""
 	if cidrWasChosenByIncus {
-		picked, err := h.pickedSubnet(ctx, zone, payload)
+		picked, err := h.pickedSubnet(ctx, cl, payload)
 		if err != nil {
 			return err
 		}
@@ -150,8 +149,8 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	return sendStatus(ctx, h.cp, payload.NetworkId, report)
 }
 
-func (h *Create) pickedSubnet(ctx context.Context, zone *cluster.Zone, payload createPayload) (Subnet, error) {
-	networks, err := zone.Provider.ListNetworksAllProjects(ctx)
+func (h *Create) pickedSubnet(ctx context.Context, cl *cluster.Cluster, payload createPayload) (Subnet, error) {
+	networks, err := cl.Provider.ListNetworksAllProjects(ctx)
 	if err != nil {
 		return Subnet{}, err
 	}
@@ -182,12 +181,12 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	report := statusReport{Report: reportRequestFailed, Reason: reasonCreateFailed, Detail: cause.Error()}
 	// Whether Incus holds the network decides whether the control plane keeps the network's /64: a list that
 	// failed answers neither, so the next lease sends the give-up again.
-	networkExists, err := h.networkExists(ctx, leased.ZoneId, payload)
+	networkExists, err := h.networkExists(ctx, leased.ClusterId, payload)
 	if err != nil {
 		return err
 	}
 	if !networkExists {
-		h.deleteAcl(ctx, leased.ZoneId, payload)
+		h.deleteAcl(ctx, leased.ClusterId, payload)
 	}
 	if networkExists {
 		report.ExternalId = provider.NetworkName(payload.NetworkId)
@@ -199,9 +198,9 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 		// Incus chose the subnet: report the one it has, not an empty one Titan would record.
 		cidrWasChosenByIncus := payload.Cidr == ""
 		if cidrWasChosenByIncus {
-			zone, err := h.zones.Zone(ctx, leased.ZoneId)
+			cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 			if err == nil {
-				picked, err := h.pickedSubnet(ctx, zone, payload)
+				picked, err := h.pickedSubnet(ctx, cl, payload)
 				if err == nil {
 					report.Cidr = picked.Cidr
 					report.Gateway = picked.Gateway
@@ -215,24 +214,24 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 // deleteAcl removes the ACL an earlier run made before its network failed: the control plane deletes a network with no
 // provider id locally, so no network.delete comes for it. Best effort: a network that does exist after all keeps its
 // ACL, because Incus refuses to delete an ACL in use.
-func (h *Create) deleteAcl(ctx context.Context, zoneId string, payload createPayload) {
-	zone, err := h.zones.Zone(ctx, zoneId)
+func (h *Create) deleteAcl(ctx context.Context, clusterId string, payload createPayload) {
+	cl, err := h.clusters.Cluster(ctx, clusterId)
 	if err != nil {
 		return
 	}
-	_ = zone.Provider.DeleteNetworkACL(ctx, payload.ProjectName, provider.NetworkAclName(payload.NetworkId))
+	_ = cl.Provider.DeleteNetworkACL(ctx, payload.ProjectName, provider.NetworkAclName(payload.NetworkId))
 }
 
-func (h *Create) networkExists(ctx context.Context, zoneId string, payload createPayload) (bool, error) {
-	zone, err := h.zones.Zone(ctx, zoneId)
+func (h *Create) networkExists(ctx context.Context, clusterId string, payload createPayload) (bool, error) {
+	cl, err := h.clusters.Cluster(ctx, clusterId)
 	if err != nil {
-		// A zone with no cluster never had the network; a connection that may come back tells nothing yet.
+		// A cluster that is not configured never had the network; a connection that may come back tells nothing yet.
 		if !command.IsRetryable(err) {
 			return false, nil
 		}
 		return false, err
 	}
-	networks, err := zone.Provider.ListNetworksAllProjects(ctx)
+	networks, err := cl.Provider.ListNetworksAllProjects(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -322,7 +321,7 @@ func publicIpv6Mismatch(name string, config map[string]string, uplink string, pu
 
 // NetworkRequest: tenant IPv4 reaches only the VMs of its own network — no router out, no NAT, and two tenants may use
 // the same CIDR (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/vm-network.md#no-ipv4-egress). Without public IPv6 the network has no uplink at all;
-// with it, the network goes on the zone's uplink with its /64, no NAT, and its router at the address the OVH route of
+// with it, the network goes on the cluster's uplink with its /64, no NAT, and its router at the address the OVH route of
 // that /64 points to (https://github.com/OpenViCloud/titan-ops/blob/main/docs/infra/incus/design.md#ipv6-ovn-uplink). The network carries its ACL, with defaultAction for
 // traffic no rule allows.
 func NetworkRequest(payload createPayload, ipv4Address string, defaultAction string, uplink string, publicIpv6 PublicIpv6) (api.NetworksPost, error) {

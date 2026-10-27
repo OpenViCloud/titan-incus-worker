@@ -21,18 +21,18 @@ const (
 	vmId         = "99999999-8888-7777-6666-555555555555"
 	instance     = "vminstance"
 	project      = "t-0123456789abcdef0123456789abcdef"
-	zoneId       = "mock"
+	clusterId    = "mock"
 )
 
 const statusPath = "PATCH /internal/vms/" + vmId + "/snapshots/" + snapshotId + "/status"
 
-func zones(p *testsupport.Provider) cluster.Fixed {
-	return cluster.Fixed{zoneId: {Provider: p}}
+func clusters(p *testsupport.Provider) cluster.Fixed {
+	return cluster.Fixed{clusterId: {Provider: p}}
 }
 
 func leased(kind string, payload map[string]any) command.Leased {
 	encoded, _ := json.Marshal(payload)
-	return command.Leased{Kind: kind, ZoneId: zoneId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
+	return command.Leased{Kind: kind, ClusterId: clusterId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
 }
 
 func onlyBody(t *testing.T, cp *testsupport.ControlPlane, prefix string) map[string]any {
@@ -50,13 +50,13 @@ func onlyBody(t *testing.T, cp *testsupport.ControlPlane, prefix string) map[str
 
 func createLeased() command.Leased {
 	return leased("vm-snapshot.create", map[string]any{
-		"snapshotId": snapshotId, "vmId": vmId, "externalVmId": instance, "name": "before-upgrade", "projectName": project, "zoneId": zoneId,
+		"snapshotId": snapshotId, "vmId": vmId, "externalVmId": instance, "name": "before-upgrade", "projectName": project,
 	})
 }
 
 func snapshotLeased(kind string) command.Leased {
 	return leased(kind, map[string]any{
-		"snapshotId": snapshotId, "vmId": vmId, "externalSnapshotId": instance + "/" + snapshotName, "projectName": project, "zoneId": zoneId,
+		"snapshotId": snapshotId, "vmId": vmId, "externalSnapshotId": instance + "/" + snapshotName, "projectName": project,
 	})
 }
 
@@ -64,7 +64,7 @@ func TestCreate_SnapshotsTheInstanceUnderTitansName_AndReportsCreatedWithInstanc
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestCreate_SnapshotAlreadyThere_ReportsCreated(t *testing.T) {
 		Message:     `Failed creating instance snapshot record "` + snapshotName + `": Add snapshot info to the database: This "Instance_snapshot" entry already exists`,
 	}
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(), logger)
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(), logger)
 
 	if err != nil {
 		t.Fatalf("a duplicate must not fail the create: %v", err)
@@ -107,7 +107,7 @@ func TestCreate_OtherOperationFailure_FailsTheRun(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.CreateSnapshotErr = &provider.OperationFailedError{Description: "Snapshotting instance", Status: "Failure", Message: "injected snapshot failure"}
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
 
 	if err == nil || len(cp.RequestsTo("PATCH")) != 0 {
 		t.Fatalf("err %v, reports %+v", err, cp.RequestsTo("PATCH"))
@@ -123,15 +123,15 @@ func TestGiveUps_ReportRequestFailedWithAFixedReason_AndTheRawErrorAsDetail(t *t
 		reason  string
 	}{
 		{func(cp *testsupport.ControlPlane) command.Handler {
-			return NewCreate(cp.Client(), zones(testsupport.NewProvider()))
+			return NewCreate(cp.Client(), clusters(testsupport.NewProvider()))
 		},
 			createLeased(), reasonCreateFailed},
 		{func(cp *testsupport.ControlPlane) command.Handler {
-			return NewRevert(cp.Client(), zones(testsupport.NewProvider()))
+			return NewRevert(cp.Client(), clusters(testsupport.NewProvider()))
 		},
 			snapshotLeased("vm-snapshot.revert"), reasonRevertFailed},
 		{func(cp *testsupport.ControlPlane) command.Handler {
-			return NewDelete(cp.Client(), zones(testsupport.NewProvider()))
+			return NewDelete(cp.Client(), clusters(testsupport.NewProvider()))
 		},
 			snapshotLeased("vm-snapshot.delete"), reasonDeleteFailed},
 	}
@@ -159,7 +159,7 @@ func TestCreate_GiveUp_CarriesTheIdOnlyWhenTheSnapshotExists(t *testing.T) {
 			p.InstanceSnapshots[project+"/"+instance+"/"+snapshotName] = true
 		}
 
-		err := NewCreate(cp.Client(), zones(p)).GiveUp(context.Background(), createLeased(), errors.New("raw"), testsupport.DiscardLogger())
+		err := NewCreate(cp.Client(), clusters(p)).GiveUp(context.Background(), createLeased(), errors.New("raw"), testsupport.DiscardLogger())
 
 		if err != nil {
 			t.Fatal(err)
@@ -181,7 +181,7 @@ func TestRevert_RestoresTheSnapshotsDiskOnly_AndReportsReverted(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewRevert(cp.Client(), zones(p)).Run(context.Background(), snapshotLeased("vm-snapshot.revert"), testsupport.DiscardLogger())
+	err := NewRevert(cp.Client(), clusters(p)).Run(context.Background(), snapshotLeased("vm-snapshot.revert"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -199,7 +199,7 @@ func TestRevert_VmGone_IsPermanent(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.UpdateInstanceErr = testsupport.NotFound("Instance not found")
 
-	err := NewRevert(cp.Client(), zones(p)).Run(context.Background(), snapshotLeased("vm-snapshot.revert"), testsupport.DiscardLogger())
+	err := NewRevert(cp.Client(), clusters(p)).Run(context.Background(), snapshotLeased("vm-snapshot.revert"), testsupport.DiscardLogger())
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want a permanent error, got %v", err)
@@ -215,7 +215,7 @@ func TestDelete_SnapshotThereOrGone_ReportsDeleted(t *testing.T) {
 			p.InstanceSnapshots[project+"/"+instance+"/"+snapshotName] = true
 		}
 
-		err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), snapshotLeased("vm-snapshot.delete"), logger)
+		err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), snapshotLeased("vm-snapshot.delete"), logger)
 
 		if err != nil || len(p.InstanceSnapshots) != 0 {
 			t.Fatalf("exists=%v: err %v, left %v", exists, err, p.InstanceSnapshots)
@@ -239,7 +239,7 @@ func TestDelete_VmGone_ReportsDeleted(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.DeleteSnapshotErr = testsupport.NotFound(`Failed to fetch instance "` + instance + `" in project "` + project + `": Instance not found`)
 
-	err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), snapshotLeased("vm-snapshot.delete"), logger)
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), snapshotLeased("vm-snapshot.delete"), logger)
 
 	if err != nil || onlyBody(t, cp, statusPath)["report"] != "Deleted" {
 		t.Fatalf("err %v", err)
@@ -285,13 +285,13 @@ func TestDecideReport(t *testing.T) {
 // (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#existence-axis).
 func TestReconcile_ReportsOnTheSnapshotsVm_AGoneSnapshotAsNotFound(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond("GET", "/internal/reconcile/vm-snapshots?zoneId=mock", 200,
+	cp.Respond("GET", "/internal/reconcile/vm-snapshots?clusterId=mock", 200,
 		`[{"id":"`+snapshotId+`","vmId":"`+vmId+`","externalId":"vma/sone","currentExistence":"Exists"}]`)
 	p := testsupport.NewProvider()
 	p.VirtualMachines = []api.InstanceFull{{Instance: api.Instance{Name: "vma"}}}
 	logger, logs := testsupport.NewLogCapture(t)
 
-	err := Reconcile(context.Background(), cp.Client(), p, zoneId, logger)
+	err := Reconcile(context.Background(), cp.Client(), p, clusterId, logger)
 
 	body := onlyBody(t, cp, statusPath)
 	if err != nil || body["report"] != "Observed" || body["exists"] != false {

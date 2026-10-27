@@ -26,20 +26,20 @@ const (
 	existenceNotFound = "NotFound"
 )
 
-// Reconcile observes one zone's VM snapshots and reports what differs; it never acts on Incus, and it never reports
+// Reconcile observes one cluster's VM snapshots and reports what differs; it never acts on Incus, and it never reports
 // Deleted: a snapshot gone is NotFound (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#existence-axis). The all-projects
 // instance list (recursion=2) carries each instance's snapshots (lab-storage 05), so one read covers them all.
-func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, zoneId string, logger *slog.Logger) error {
+func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error {
 	var rows []ReconcilableVmSnapshot
-	if err := cp.GetJSON(ctx, "/internal/reconcile/vm-snapshots?zoneId="+url.QueryEscape(zoneId), &rows); err != nil {
-		return fmt.Errorf("list reconcilable VM snapshots of zone %s: %w", zoneId, err)
+	if err := cp.GetJSON(ctx, "/internal/reconcile/vm-snapshots?clusterId="+url.QueryEscape(clusterId), &rows); err != nil {
+		return fmt.Errorf("list reconcilable VM snapshots of cluster %s: %w", clusterId, err)
 	}
 	if len(rows) == 0 {
 		return nil
 	}
 	instances, err := p.ListVirtualMachinesAllProjects(ctx)
 	if err != nil {
-		return fmt.Errorf("observe VM snapshots of zone %s: %w", zoneId, err)
+		return fmt.Errorf("observe VM snapshots of cluster %s: %w", clusterId, err)
 	}
 	snapshotsByInstance := SnapshotsByInstance(instances)
 

@@ -1,4 +1,4 @@
-// Package loadbalancer runs the load balancer provider commands and the zone's load balancer reconciler. A Titan load
+// Package loadbalancer runs the load balancer provider commands and the cluster's load balancer reconciler. A Titan load
 // balancer is one Incus network load balancer on its network, named by its VIP
 // (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/load-balancer/design.md#lb-resource-model).
 package loadbalancer

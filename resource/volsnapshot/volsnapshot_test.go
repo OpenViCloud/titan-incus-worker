@@ -23,16 +23,16 @@ const (
 	volumeId   = "99999999-8888-7777-6666-555555555555"
 	volumeName = "volsource"
 	project    = "t-0123456789abcdef0123456789abcdef"
-	zoneId     = "mock"
+	clusterId  = "mock"
 )
 
-func zones(p *testsupport.Provider) cluster.Fixed {
-	return cluster.Fixed{zoneId: {Provider: p}}
+func clusters(p *testsupport.Provider) cluster.Fixed {
+	return cluster.Fixed{clusterId: {Provider: p}}
 }
 
 func leased(kind string, payload map[string]any) command.Leased {
 	encoded, _ := json.Marshal(payload)
-	return command.Leased{Kind: kind, ZoneId: zoneId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
+	return command.Leased{Kind: kind, ClusterId: clusterId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
 }
 
 func onlyBody(t *testing.T, cp *testsupport.ControlPlane, prefix string) map[string]any {
@@ -52,7 +52,7 @@ const snapshotPath = "PATCH /internal/volumes/" + volumeId + "/snapshots/" + sna
 
 func createLeased() command.Leased {
 	return leased("volume-snapshot.create", map[string]any{
-		"snapshotId": snapshotId, "volumeId": volumeId, "externalVolumeId": volumeName, "projectName": project, "zoneId": zoneId,
+		"snapshotId": snapshotId, "volumeId": volumeId, "externalVolumeId": volumeName, "projectName": project,
 	})
 }
 
@@ -60,7 +60,7 @@ func TestCreate_SnapshotsTheVolume_AndReportsCreatedWithVolumeSlashSnapshot(t *t
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestCreate_SnapshotAlreadyThere_ReportsCreated(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.CreateSnapshotErr = api.StatusErrorf(http.StatusConflict, `Snapshot "s%s" already in use`, encodedId)
 
-	err := NewCreate(cp.Client(), zones(p)).Run(context.Background(), createLeased(), logger)
+	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), createLeased(), logger)
 
 	if err != nil {
 		t.Fatalf("a duplicate must not fail the create: %v", err)
@@ -101,7 +101,7 @@ func TestCreate_GiveUp_CarriesTheIdOnlyWhenTheSnapshotExists(t *testing.T) {
 			p.VolumeSnapshots[project+"/"+volumeName+"/s"+encodedId] = true
 		}
 
-		err := NewCreate(cp.Client(), zones(p)).GiveUp(context.Background(), createLeased(), errors.New("raw"), testsupport.DiscardLogger())
+		err := NewCreate(cp.Client(), clusters(p)).GiveUp(context.Background(), createLeased(), errors.New("raw"), testsupport.DiscardLogger())
 
 		if err != nil {
 			t.Fatal(err)
@@ -120,7 +120,7 @@ func TestCreate_GiveUp_CarriesTheIdOnlyWhenTheSnapshotExists(t *testing.T) {
 
 func deleteLeased(externalSnapshotId string) command.Leased {
 	return leased("volume-snapshot.delete", map[string]any{
-		"snapshotId": snapshotId, "volumeId": volumeId, "externalSnapshotId": externalSnapshotId, "projectName": project, "zoneId": zoneId,
+		"snapshotId": snapshotId, "volumeId": volumeId, "externalSnapshotId": externalSnapshotId, "projectName": project,
 	})
 }
 
@@ -133,7 +133,7 @@ func TestDelete_DeletesTheNamedSnapshot_AndAGoneOne_ReportsDeleted(t *testing.T)
 			p.DeleteSnapshotErr = testsupport.NotFound("Storage pool volume not found")
 		}
 
-		err := NewDelete(cp.Client(), zones(p)).Run(context.Background(), deleteLeased(volumeName+"/sone"), logger)
+		err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), deleteLeased(volumeName+"/sone"), logger)
 
 		if err != nil {
 			t.Fatal(err)
@@ -157,7 +157,7 @@ func TestDelete_DeletesTheNamedSnapshot_AndAGoneOne_ReportsDeleted(t *testing.T)
 func TestDelete_IdWithoutAVolume_IsPermanent(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewDelete(cp.Client(), zones(testsupport.NewProvider())).Run(context.Background(), deleteLeased("sone"), testsupport.DiscardLogger())
+	err := NewDelete(cp.Client(), clusters(testsupport.NewProvider())).Run(context.Background(), deleteLeased("sone"), testsupport.DiscardLogger())
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want a permanent error, got %v", err)
@@ -167,7 +167,7 @@ func TestDelete_IdWithoutAVolume_IsPermanent(t *testing.T) {
 func TestDelete_GiveUp_ReportsRequestFailed(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewDelete(cp.Client(), zones(testsupport.NewProvider())).GiveUp(context.Background(), deleteLeased(volumeName+"/sone"), errors.New("raw"), testsupport.DiscardLogger())
+	err := NewDelete(cp.Client(), clusters(testsupport.NewProvider())).GiveUp(context.Background(), deleteLeased(volumeName+"/sone"), errors.New("raw"), testsupport.DiscardLogger())
 
 	body := onlyBody(t, cp, snapshotPath)
 	if err != nil || body["report"] != "RequestFailed" || body["reason"] != reasonDeleteFailed || body["detail"] != "raw" {
@@ -178,7 +178,7 @@ func TestDelete_GiveUp_ReportsRequestFailed(t *testing.T) {
 func restoreLeased() command.Leased {
 	return leased("volume-snapshot.restore", map[string]any{
 		"snapshotId": "77777777-7777-7777-7777-777777777777", "newVolumeId": newVolumeId, "externalSnapshotId": volumeName + "/sone",
-		"name": "restored-1", "projectName": project, "zoneId": zoneId,
+		"name": "restored-1", "projectName": project,
 	})
 }
 
@@ -188,7 +188,7 @@ func TestRestore_CopiesTheSnapshotIntoTheNewVolume_KeepingTheDisplayName_AndRepo
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewRestore(cp.Client(), zones(p)).Run(context.Background(), restoreLeased(), testsupport.DiscardLogger())
+	err := NewRestore(cp.Client(), clusters(p)).Run(context.Background(), restoreLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestRestore_NewVolumeAlreadyThere_ReportsCreated(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.CreateVolumeErr = api.StatusErrorf(http.StatusConflict, "Volume by that name already exists")
 
-	err := NewRestore(cp.Client(), zones(p)).Run(context.Background(), restoreLeased(), logger)
+	err := NewRestore(cp.Client(), clusters(p)).Run(context.Background(), restoreLeased(), logger)
 
 	if err != nil || onlyBody(t, cp, newVolumePath)["report"] != "Created" {
 		t.Fatalf("err %v", err)
@@ -230,7 +230,7 @@ func TestRestore_NewVolumeAlreadyThere_ReportsCreated(t *testing.T) {
 func TestRestore_GiveUp_ReportsRequestFailedOnTheNewVolume(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewRestore(cp.Client(), zones(testsupport.NewProvider())).GiveUp(context.Background(), restoreLeased(), errors.New("raw"), testsupport.DiscardLogger())
+	err := NewRestore(cp.Client(), clusters(testsupport.NewProvider())).GiveUp(context.Background(), restoreLeased(), errors.New("raw"), testsupport.DiscardLogger())
 
 	body := onlyBody(t, cp, newVolumePath)
 	if err != nil || body["report"] != "RequestFailed" || body["reason"] != volume.ReasonCreateFailed || body["detail"] != "raw" {

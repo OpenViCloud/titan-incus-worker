@@ -25,14 +25,13 @@ type actionPayload struct {
 	IntentId     string `json:"intentId"`
 	ExternalVmId string `json:"externalVmId"`
 	ProjectName  string `json:"projectName"`
-	ZoneId       string `json:"zoneId"`
 }
 
 // Action runs vm.stop or vm.start. Success reports nothing: the reconciler observes Stopped/Running. Giving up
 // withdraws the intent (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/vm/design.md#intent-failed-callback).
 type Action struct {
 	cp          *controlplane.Client
-	zones       cluster.Zones
+	clusters    cluster.Clusters
 	state       api.InstanceStatePut
 	alreadyDone string
 	// Incus counts a Frozen instance as running: action "start" answers "already running" and leaves it Frozen,
@@ -41,14 +40,14 @@ type Action struct {
 	unfreezesFrozen bool
 }
 
-func NewStop(cp *controlplane.Client, zones cluster.Zones) *Action {
+func NewStop(cp *controlplane.Client, clusters cluster.Clusters) *Action {
 	stop := api.InstanceStatePut{Action: "stop", Force: true, Timeout: forceStopTimeoutSeconds}
-	return &Action{cp: cp, zones: zones, state: stop, alreadyDone: alreadyStopped}
+	return &Action{cp: cp, clusters: clusters, state: stop, alreadyDone: alreadyStopped}
 }
 
-func NewStart(cp *controlplane.Client, zones cluster.Zones) *Action {
+func NewStart(cp *controlplane.Client, clusters cluster.Clusters) *Action {
 	start := api.InstanceStatePut{Action: "start"}
-	return &Action{cp: cp, zones: zones, state: start, alreadyDone: alreadyRunning, unfreezesFrozen: true}
+	return &Action{cp: cp, clusters: clusters, state: start, alreadyDone: alreadyRunning, unfreezesFrozen: true}
 }
 
 func (h *Action) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -60,14 +59,14 @@ func (h *Action) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if !isComplete {
 		return command.Permanent(fmt.Errorf("vm.%s payload lacks vmId, externalVmId or projectName", h.state.Action))
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
 
 	state := h.state
 	if h.unfreezesFrozen {
-		instance, err := zone.Provider.GetInstance(ctx, payload.ProjectName, payload.ExternalVmId)
+		instance, err := cl.Provider.GetInstance(ctx, payload.ProjectName, payload.ExternalVmId)
 		if err != nil {
 			if provider.IsNotFound(err) {
 				return command.Permanent(err)
@@ -79,7 +78,7 @@ func (h *Action) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 		}
 	}
 
-	err = zone.Provider.UpdateInstanceState(ctx, payload.ProjectName, payload.ExternalVmId, state)
+	err = cl.Provider.UpdateInstanceState(ctx, payload.ProjectName, payload.ExternalVmId, state)
 	if err == nil {
 		return nil
 	}

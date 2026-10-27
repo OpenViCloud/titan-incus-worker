@@ -116,7 +116,7 @@ func (l *Loop) kinds() []string {
 func (l *Loop) execute(ctx context.Context, leaseId string, leased Leased) {
 	// commandId and leaseId find the row in core.provider_commands; every line of this run, the handler's too, has them.
 	logger := l.logger.With("commandId", leased.Id, "leaseId", leaseId, "kind", leased.Kind, "key", leased.Key,
-		"zoneId", leased.ZoneId, "attempt", leased.Attempt, "maxAttempts", leased.MaxAttempts)
+		"clusterId", leased.ClusterId, "attempt", leased.Attempt, "maxAttempts", leased.MaxAttempts)
 	logger.Info("provider command started")
 	route, known := l.routes[leased.Kind]
 	if !known {

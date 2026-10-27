@@ -1,4 +1,4 @@
-// Package network runs the network provider commands and the zone's network reconciler.
+// Package network runs the network provider commands and the cluster's network reconciler.
 package network
 
 import (

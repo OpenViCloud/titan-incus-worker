@@ -1,5 +1,5 @@
 // Command incus-worker is Titan's only actor on Incus: it leases provider commands from the control plane, runs them
-// against the zone's cluster, reports back, and runs the reconcilers
+// against the cluster, reports back, and runs the reconcilers
 // (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md#go-worker).
 package main
 
@@ -60,11 +60,11 @@ func main() {
 	defer stop()
 
 	cp := controlplane.New(loaded.cpBaseUrl, loaded.cpInternalToken)
-	zones := cluster.NewResolver(cp, cluster.ConnectIncus, logger)
-	tenantRoutes, backupRoutes := splitBackupRoutes(routes(cp, zones, loaded.imageServer, loaded.backupTarget))
+	clusters := cluster.NewResolver(cp, cluster.ConnectIncus, logger)
+	tenantRoutes, backupRoutes := splitBackupRoutes(routes(cp, clusters, loaded.imageServer, loaded.backupTarget))
 	loop := command.NewLoop(cp, tenantRoutes, loaded.pollInterval, logger)
 	backupLoop := command.NewLoop(cp, backupRoutes, loaded.pollInterval, logger.With("loop", "backup"))
-	reconciler := reconcile.NewRunner(cp, zones, reconcilers(), loaded.reconcileInterval, logger)
+	reconciler := reconcile.NewRunner(cp, clusters, reconcilers(), loaded.reconcileInterval, logger)
 	health := healthServer(loaded.healthAddr)
 
 	var running sync.WaitGroup
@@ -102,36 +102,36 @@ func main() {
 	running.Wait()
 }
 
-func routes(cp *controlplane.Client, zones cluster.Zones, imageServer string, target backup.Target) map[string]command.Route {
+func routes(cp *controlplane.Client, clusters cluster.Clusters, imageServer string, target backup.Target) map[string]command.Route {
 	objects := bucket.New(target.Url, target.Bucket, target.AccessKeyId, target.SecretAccessKey)
 	return map[string]command.Route{
-		"vm.create":            {Handler: vm.NewCreate(cp, zones), Timeout: vmCommandTimeout},
-		"vm.delete":            {Handler: vm.NewDelete(cp, zones), Timeout: vmCommandTimeout},
-		"vm.stop":              {Handler: vm.NewStop(cp, zones), Timeout: vmCommandTimeout},
-		"vm.start":             {Handler: vm.NewStart(cp, zones), Timeout: vmCommandTimeout},
-		"network.create":       {Handler: network.NewCreate(cp, zones), Timeout: networkCommandTimeout},
-		"network.delete":       {Handler: network.NewDelete(cp, zones), Timeout: networkCommandTimeout},
-		"firewall-rule.create": {Handler: firewall.NewCreate(cp, zones), Timeout: networkCommandTimeout},
-		"firewall-rule.delete": {Handler: firewall.NewDelete(cp, zones), Timeout: networkCommandTimeout},
-		"template.sync":        {Handler: template.NewSync(cp, zones, imageServer), Timeout: templateSyncTimeout},
+		"vm.create":            {Handler: vm.NewCreate(cp, clusters), Timeout: vmCommandTimeout},
+		"vm.delete":            {Handler: vm.NewDelete(cp, clusters), Timeout: vmCommandTimeout},
+		"vm.stop":              {Handler: vm.NewStop(cp, clusters), Timeout: vmCommandTimeout},
+		"vm.start":             {Handler: vm.NewStart(cp, clusters), Timeout: vmCommandTimeout},
+		"network.create":       {Handler: network.NewCreate(cp, clusters), Timeout: networkCommandTimeout},
+		"network.delete":       {Handler: network.NewDelete(cp, clusters), Timeout: networkCommandTimeout},
+		"firewall-rule.create": {Handler: firewall.NewCreate(cp, clusters), Timeout: networkCommandTimeout},
+		"firewall-rule.delete": {Handler: firewall.NewDelete(cp, clusters), Timeout: networkCommandTimeout},
+		"template.sync":        {Handler: template.NewSync(cp, clusters, imageServer), Timeout: templateSyncTimeout},
 
-		"load-balancer.create": {Handler: loadbalancer.NewCreate(cp, zones), Timeout: networkCommandTimeout},
-		"load-balancer.update": {Handler: loadbalancer.NewUpdate(cp, zones), Timeout: networkCommandTimeout},
-		"load-balancer.delete": {Handler: loadbalancer.NewDelete(cp, zones), Timeout: networkCommandTimeout},
+		"load-balancer.create": {Handler: loadbalancer.NewCreate(cp, clusters), Timeout: networkCommandTimeout},
+		"load-balancer.update": {Handler: loadbalancer.NewUpdate(cp, clusters), Timeout: networkCommandTimeout},
+		"load-balancer.delete": {Handler: loadbalancer.NewDelete(cp, clusters), Timeout: networkCommandTimeout},
 
-		"volume.create":           {Handler: volume.NewCreate(cp, zones), Timeout: storageCommandTimeout},
-		"volume.attach":           {Handler: volume.NewAttach(cp, zones), Timeout: storageCommandTimeout},
-		"volume.detach":           {Handler: volume.NewDetach(cp, zones), Timeout: storageCommandTimeout},
-		"volume.delete":           {Handler: volume.NewDelete(cp, zones), Timeout: storageCommandTimeout},
-		"volume-snapshot.create":  {Handler: volsnapshot.NewCreate(cp, zones), Timeout: storageCommandTimeout},
-		"volume-snapshot.delete":  {Handler: volsnapshot.NewDelete(cp, zones), Timeout: storageCommandTimeout},
-		"volume-snapshot.restore": {Handler: volsnapshot.NewRestore(cp, zones), Timeout: storageCommandTimeout},
-		"vm-snapshot.create":      {Handler: vmsnapshot.NewCreate(cp, zones), Timeout: vmCommandTimeout},
-		"vm-snapshot.revert":      {Handler: vmsnapshot.NewRevert(cp, zones), Timeout: vmCommandTimeout},
-		"vm-snapshot.delete":      {Handler: vmsnapshot.NewDelete(cp, zones), Timeout: vmCommandTimeout},
+		"volume.create":           {Handler: volume.NewCreate(cp, clusters), Timeout: storageCommandTimeout},
+		"volume.attach":           {Handler: volume.NewAttach(cp, clusters), Timeout: storageCommandTimeout},
+		"volume.detach":           {Handler: volume.NewDetach(cp, clusters), Timeout: storageCommandTimeout},
+		"volume.delete":           {Handler: volume.NewDelete(cp, clusters), Timeout: storageCommandTimeout},
+		"volume-snapshot.create":  {Handler: volsnapshot.NewCreate(cp, clusters), Timeout: storageCommandTimeout},
+		"volume-snapshot.delete":  {Handler: volsnapshot.NewDelete(cp, clusters), Timeout: storageCommandTimeout},
+		"volume-snapshot.restore": {Handler: volsnapshot.NewRestore(cp, clusters), Timeout: storageCommandTimeout},
+		"vm-snapshot.create":      {Handler: vmsnapshot.NewCreate(cp, clusters), Timeout: vmCommandTimeout},
+		"vm-snapshot.revert":      {Handler: vmsnapshot.NewRevert(cp, clusters), Timeout: vmCommandTimeout},
+		"vm-snapshot.delete":      {Handler: vmsnapshot.NewDelete(cp, clusters), Timeout: vmCommandTimeout},
 
-		"vm.backup":     {Handler: backup.NewVm(zones, target, objects), Timeout: backupTimeout},
-		"volume.backup": {Handler: backup.NewVolume(zones, target, objects), Timeout: backupTimeout},
+		"vm.backup":     {Handler: backup.NewVm(clusters, target, objects), Timeout: backupTimeout},
+		"volume.backup": {Handler: backup.NewVolume(clusters, target, objects), Timeout: backupTimeout},
 	}
 }
 
@@ -149,7 +149,7 @@ func splitBackupRoutes(all map[string]command.Route) (map[string]command.Route, 
 	return tenant, backups
 }
 
-// reconcilers lists every resource the reconcile loop observes, in the order of one zone's cycle.
+// reconcilers lists every resource the reconcile loop observes, in the order of one cluster's cycle.
 func reconcilers() []reconcile.Kind {
 	return []reconcile.Kind{
 		{Name: "vms", Reconcile: reconcilerOfTheProvider(vm.Reconcile)},
@@ -162,18 +162,18 @@ func reconcilers() []reconcile.Kind {
 	}
 }
 
-type providerReconciler func(ctx context.Context, cp *controlplane.Client, p provider.Provider, zoneId string, logger *slog.Logger) error
+type providerReconciler func(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error
 
-// reconcilerOfTheProvider adapts a reconciler that needs nothing of the zone but its provider.
-func reconcilerOfTheProvider(reconcileKind providerReconciler) func(context.Context, *controlplane.Client, *cluster.Zone, string, *slog.Logger) error {
-	return func(ctx context.Context, cp *controlplane.Client, zone *cluster.Zone, zoneId string, logger *slog.Logger) error {
-		return reconcileKind(ctx, cp, zone.Provider, zoneId, logger)
+// reconcilerOfTheProvider adapts a reconciler that needs nothing of the cluster but its provider.
+func reconcilerOfTheProvider(reconcileKind providerReconciler) func(context.Context, *controlplane.Client, *cluster.Cluster, string, *slog.Logger) error {
+	return func(ctx context.Context, cp *controlplane.Client, cl *cluster.Cluster, clusterId string, logger *slog.Logger) error {
+		return reconcileKind(ctx, cp, cl.Provider, clusterId, logger)
 	}
 }
 
-// reconcileVolumes also needs the zone's storage pool.
-func reconcileVolumes(ctx context.Context, cp *controlplane.Client, zone *cluster.Zone, zoneId string, logger *slog.Logger) error {
-	return volume.Reconcile(ctx, cp, zone.Provider, zoneId, zone.StoragePool, logger)
+// reconcileVolumes also needs the cluster's storage pool.
+func reconcileVolumes(ctx context.Context, cp *controlplane.Client, cl *cluster.Cluster, clusterId string, logger *slog.Logger) error {
+	return volume.Reconcile(ctx, cp, cl.Provider, clusterId, cl.StoragePool, logger)
 }
 
 func healthServer(addr string) *http.Server {

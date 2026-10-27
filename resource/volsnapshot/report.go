@@ -1,5 +1,5 @@
 // Package volsnapshot runs the volume snapshot provider commands: create, delete, and restore into a new volume. The
-// zone's storage reconciler (package volume) observes them.
+// cluster's storage reconciler (package volume) observes them.
 package volsnapshot
 
 // The give-up reasons reach the tenant as the snapshot's requestFailureReason, so they are fixed texts; the raw error

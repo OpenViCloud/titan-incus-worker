@@ -13,12 +13,12 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
-// recordingKind is a reconciler that notes each zone it ran in, and fails when told to.
+// recordingKind is a reconciler that notes each cluster it ran in, and fails when told to.
 func recordingKind(name string, ranIn *[]string, err error) Kind {
 	return Kind{
 		Name: name,
-		Reconcile: func(ctx context.Context, cp *controlplane.Client, zone *cluster.Zone, zoneId string, logger *slog.Logger) error {
-			*ranIn = append(*ranIn, name+"@"+zoneId)
+		Reconcile: func(ctx context.Context, cp *controlplane.Client, cl *cluster.Cluster, clusterId string, logger *slog.Logger) error {
+			*ranIn = append(*ranIn, name+"@"+clusterId)
 			return err
 		},
 	}
@@ -28,13 +28,14 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func TestCycle_RunsEveryKindInOrder_InEveryZoneWithACluster_AndSkipsTheRest(t *testing.T) {
+func TestCycle_RunsEveryKindInOrder_InEveryConfiguredCluster_AndSkipsOneItCannotReach(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond(http.MethodGet, "/v1/zones", http.StatusOK, `[{"id":"mock","name":"Mock"},{"id":"bare","name":"No cluster"}]`)
-	zones := cluster.Fixed{"mock": {Provider: testsupport.NewProvider()}}
+	cp.Respond(http.MethodGet, "/internal/clusters", http.StatusOK, `[{"id":"mock","name":"Mock"},{"id":"gone","name":"Gone"}]`)
+	clusters := cluster.Fixed{"mock": {Provider: testsupport.NewProvider()}}
 	ran := []string{}
 	kinds := []Kind{recordingKind("first", &ran, nil), recordingKind("second", &ran, nil)}
-	runner := NewRunner(cp.Client(), zones, kinds, 0, discardLogger())
+	logger, logs := testsupport.NewLogCapture(t)
+	runner := NewRunner(cp.Client(), clusters, kinds, 0, logger)
 
 	runner.Cycle(context.Background())
 	runner.Cycle(context.Background())
@@ -48,17 +49,18 @@ func TestCycle_RunsEveryKindInOrder_InEveryZoneWithACluster_AndSkipsTheRest(t *t
 			t.Fatalf("ran %v, want %v", ran, want)
 		}
 	}
-	if !runner.loggedWithoutCluster["bare"] {
-		t.Fatal("the zone without a cluster was not noted")
+	skipped := logs.Records("reconcile: cannot reach the cluster; skipping it this cycle")
+	if len(skipped) != 2 || skipped[0]["clusterId"] != "gone" {
+		t.Fatalf("want the unreachable cluster warned once per cycle, got %v", skipped)
 	}
-	if cp.RequestsTo("GET /v1/zones")[0].Token != "" {
-		t.Fatal("the internal token went to the public zones route")
+	if cp.RequestsTo("GET /internal/clusters")[0].Token == "" {
+		t.Fatal("the cluster list was read without the internal token")
 	}
 }
 
 func TestCycle_OneKindFailing_DoesNotStopTheOthers(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond(http.MethodGet, "/v1/zones", http.StatusOK, `[{"id":"mock","name":"Mock"}]`)
+	cp.Respond(http.MethodGet, "/internal/clusters", http.StatusOK, `[{"id":"mock","name":"Mock"}]`)
 	ran := []string{}
 	kinds := []Kind{recordingKind("failing", &ran, errors.New("list failed")), recordingKind("after", &ran, nil)}
 	runner := NewRunner(cp.Client(), cluster.Fixed{"mock": {Provider: testsupport.NewProvider()}}, kinds, 0, discardLogger())
@@ -71,14 +73,14 @@ func TestCycle_OneKindFailing_DoesNotStopTheOthers(t *testing.T) {
 	}
 }
 
-func TestCycle_HandsEachKindALoggerWithItsKindAndZone_AndLogsHowLongTheZoneTook(t *testing.T) {
+func TestCycle_HandsEachKindALoggerWithItsKindAndCluster_AndLogsHowLongTheClusterTook(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond(http.MethodGet, "/v1/zones", http.StatusOK, `[{"id":"mock","name":"Mock"}]`)
+	cp.Respond(http.MethodGet, "/internal/clusters", http.StatusOK, `[{"id":"mock","name":"Mock"}]`)
 	logger, logs := testsupport.NewLogCapture(t)
 	logging := func(name string) Kind {
 		return Kind{
 			Name: name,
-			Reconcile: func(ctx context.Context, cp *controlplane.Client, zone *cluster.Zone, zoneId string, logger *slog.Logger) error {
+			Reconcile: func(ctx context.Context, cp *controlplane.Client, cl *cluster.Cluster, clusterId string, logger *slog.Logger) error {
 				logger.Info("kind ran")
 				return nil
 			},
@@ -91,14 +93,14 @@ func TestCycle_HandsEachKindALoggerWithItsKindAndZone_AndLogsHowLongTheZoneTook(
 
 	ran := logs.Records("kind ran")
 	isTagged := len(ran) == 2 && ran[0]["kind"] == "first" && ran[1]["kind"] == "second" &&
-		ran[0]["zoneId"] == "mock" && ran[1]["zoneId"] == "mock"
+		ran[0]["clusterId"] == "mock" && ran[1]["clusterId"] == "mock"
 	if !isTagged {
 		t.Fatalf("kind lines: %v", ran)
 	}
-	done := logs.One("reconcile zone done")
+	done := logs.One("reconcile cluster done")
 	durations, isObject := done["durationsMs"].(map[string]any)
-	if done["zoneId"] != "mock" || !isObject {
-		t.Fatalf("zone line: %v", done)
+	if done["clusterId"] != "mock" || !isObject {
+		t.Fatalf("cluster line: %v", done)
 	}
 	for _, name := range []string{"first", "second"} {
 		_, isNumber := durations[name].(float64)

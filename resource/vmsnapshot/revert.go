@@ -16,12 +16,12 @@ import (
 // Disk only: a full restore also puts back the snapshot's devices and config, which would attach or detach volumes
 // and resize the VM behind Titan's back. It reports Reverted, which ends the revert; giving up reports the request failed.
 type Revert struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewRevert(cp *controlplane.Client, zones cluster.Zones) *Revert {
-	return &Revert{cp: cp, zones: zones}
+func NewRevert(cp *controlplane.Client, clusters cluster.Clusters) *Revert {
+	return &Revert{cp: cp, clusters: clusters}
 }
 
 func (h *Revert) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -29,11 +29,11 @@ func (h *Revert) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return err
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	err = zone.Provider.UpdateInstance(ctx, payload.ProjectName, instance, api.InstancePut{Restore: snapshot, DiskOnly: true})
+	err = cl.Provider.UpdateInstance(ctx, payload.ProjectName, instance, api.InstancePut{Restore: snapshot, DiskOnly: true})
 	if provider.IsNotFound(err) {
 		// The VM is gone: no later lease can revert it.
 		return command.Permanent(err)

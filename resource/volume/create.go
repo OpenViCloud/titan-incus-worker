@@ -21,7 +21,6 @@ const DisplayNameKey = "user.titan-name"
 type createPayload struct {
 	VolumeId    string `json:"volumeId"`
 	Name        string `json:"name"`
-	ZoneId      string `json:"zoneId"`
 	SizeGb      int    `json:"sizeGb"`
 	ProjectName string `json:"projectName"`
 }
@@ -29,12 +28,12 @@ type createPayload struct {
 // Create runs volume.create: an empty block volume in the tenant's project. Incus has made it once the request
 // returns, so it reports Created with the provider id: the create is done.
 type Create struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewCreate(cp *controlplane.Client, zones cluster.Zones) *Create {
-	return &Create{cp: cp, zones: zones}
+func NewCreate(cp *controlplane.Client, clusters cluster.Clusters) *Create {
+	return &Create{cp: cp, clusters: clusters}
 }
 
 func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -50,11 +49,11 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return command.Permanent(err)
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	if err := provider.EnsureProject(ctx, zone.Provider, payload.ProjectName); err != nil {
+	if err := provider.EnsureProject(ctx, cl.Provider, payload.ProjectName); err != nil {
 		return err
 	}
 
@@ -67,7 +66,7 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 			DisplayNameKey: payload.Name,
 		}},
 	}
-	err = zone.Provider.CreateVolume(ctx, payload.ProjectName, provider.StoragePoolOrDefault(zone.StoragePool), request)
+	err = cl.Provider.CreateVolume(ctx, payload.ProjectName, provider.StoragePoolOrDefault(cl.StoragePool), request)
 	// 409: an earlier run of this command made it (lab-storage 02); the name is ours.
 	isOurs := err != nil && provider.IsConflict(err)
 	if err != nil && !isOurs {
@@ -86,12 +85,12 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 		return err
 	}
 	report := StatusReport{Report: ReportRequestFailed, Reason: ReasonCreateFailed, Detail: cause.Error()}
-	report.ExternalId = ExistingVolume(ctx, h.zones, leased.ZoneId, payload.ProjectName, payload.VolumeId)
+	report.ExternalId = ExistingVolume(ctx, h.clusters, leased.ClusterId, payload.ProjectName, payload.VolumeId)
 	return SendStatus(ctx, h.cp, payload.VolumeId, report)
 }
 
 // ExistingVolume returns the volume's Incus name when it is there, "" when it is not or cannot be read.
-func ExistingVolume(ctx context.Context, zones cluster.Zones, zoneId string, project string, volumeId string) string {
+func ExistingVolume(ctx context.Context, clusters cluster.Clusters, clusterId string, project string, volumeId string) string {
 	if project == "" {
 		return ""
 	}
@@ -99,11 +98,11 @@ func ExistingVolume(ctx context.Context, zones cluster.Zones, zoneId string, pro
 	if err != nil {
 		return ""
 	}
-	zone, err := zones.Zone(ctx, zoneId)
+	cl, err := clusters.Cluster(ctx, clusterId)
 	if err != nil {
 		return ""
 	}
-	_, err = zone.Provider.GetVolume(ctx, project, provider.StoragePoolOrDefault(zone.StoragePool), name)
+	_, err = cl.Provider.GetVolume(ctx, project, provider.StoragePoolOrDefault(cl.StoragePool), name)
 	if err != nil {
 		return ""
 	}

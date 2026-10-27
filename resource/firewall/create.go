@@ -15,12 +15,12 @@ import (
 // Create runs firewall-rule.create: the rule goes into its network's ACL. It reports the provider id (Created); the
 // reconciler reports Active.
 type Create struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewCreate(cp *controlplane.Client, zones cluster.Zones) *Create {
-	return &Create{cp: cp, zones: zones}
+func NewCreate(cp *controlplane.Client, clusters cluster.Clusters) *Create {
+	return &Create{cp: cp, clusters: clusters}
 }
 
 func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -32,12 +32,12 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return command.Permanent(err)
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
 	aclName := provider.NetworkAclName(payload.NetworkId)
-	acl, etag, err := zone.Provider.GetNetworkACL(ctx, payload.ProjectName, aclName)
+	acl, etag, err := cl.Provider.GetNetworkACL(ctx, payload.ProjectName, aclName)
 	// network.create makes the ACL with the network's default action; a rule cannot make one without knowing it.
 	if provider.IsNotFound(err) {
 		return command.Permanent(fmt.Errorf("network %s has no ACL %s: %w", payload.NetworkId, aclName, err))
@@ -59,7 +59,7 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 			put.Egress = append(put.Egress, rule)
 		}
 		// A 412 (someone wrote the ACL since our read) is retryable: the next lease reads it again.
-		if err := zone.Provider.UpdateNetworkACL(ctx, payload.ProjectName, aclName, put, etag); err != nil {
+		if err := cl.Provider.UpdateNetworkACL(ctx, payload.ProjectName, aclName, put, etag); err != nil {
 			return err
 		}
 	}
@@ -79,21 +79,21 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	}
 	report := statusReport{Report: reportRequestFailed, Reason: reasonCreateFailed, Detail: cause.Error()}
 	aclName := provider.NetworkAclName(payload.NetworkId)
-	if h.ruleExists(ctx, leased.ZoneId, payload.ProjectName, aclName, payload.RuleId) {
+	if h.ruleExists(ctx, leased.ClusterId, payload.ProjectName, aclName, payload.RuleId) {
 		report.ExternalRuleId = ProviderId(aclName, payload.RuleId)
 	}
 	return sendStatus(ctx, h.cp, payload.NetworkId, payload.RuleId, report)
 }
 
-func (h *Create) ruleExists(ctx context.Context, zoneId string, project string, aclName string, ruleId string) bool {
+func (h *Create) ruleExists(ctx context.Context, clusterId string, project string, aclName string, ruleId string) bool {
 	if project == "" {
 		return false
 	}
-	zone, err := h.zones.Zone(ctx, zoneId)
+	cl, err := h.clusters.Cluster(ctx, clusterId)
 	if err != nil {
 		return false
 	}
-	acl, _, err := zone.Provider.GetNetworkACL(ctx, project, aclName)
+	acl, _, err := cl.Provider.GetNetworkACL(ctx, project, aclName)
 	if err != nil {
 		return false
 	}

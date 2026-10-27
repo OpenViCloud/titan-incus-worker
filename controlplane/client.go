@@ -62,18 +62,18 @@ func NewWithHTTPClient(baseUrl string, token string, httpClient *http.Client) *C
 
 // Put, Patch: payload nil sends no body.
 func (c *Client) Put(ctx context.Context, path string, payload any) error {
-	_, err := c.send(ctx, http.MethodPut, path, payload, true)
+	_, err := c.send(ctx, http.MethodPut, path, payload)
 	return err
 }
 
 func (c *Client) Patch(ctx context.Context, path string, payload any) error {
-	_, err := c.send(ctx, http.MethodPatch, path, payload, true)
+	_, err := c.send(ctx, http.MethodPatch, path, payload)
 	return err
 }
 
 // Get returns the whole body of a 2xx.
 func (c *Client) Get(ctx context.Context, path string) ([]byte, error) {
-	return c.send(ctx, http.MethodGet, path, nil, true)
+	return c.send(ctx, http.MethodGet, path, nil)
 }
 
 // GetJSON decodes a 2xx body into target.
@@ -88,19 +88,7 @@ func (c *Client) GetJSON(ctx context.Context, path string, target any) error {
 	return nil
 }
 
-// GetPublicJSON reads an anonymous route; the internal token never leaves on a public path.
-func (c *Client) GetPublicJSON(ctx context.Context, path string, target any) error {
-	body, err := c.send(ctx, http.MethodGet, path, nil, false)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(body, target); err != nil {
-		return fmt.Errorf("control plane GET %s: decode: %w", path, err)
-	}
-	return nil
-}
-
-func (c *Client) send(ctx context.Context, method string, path string, payload any, withToken bool) ([]byte, error) {
+func (c *Client) send(ctx context.Context, method string, path string, payload any) ([]byte, error) {
 	var requestBody io.Reader
 	hasPayload := payload != nil
 	if hasPayload {
@@ -118,9 +106,7 @@ func (c *Client) send(ctx context.Context, method string, path string, payload a
 	if hasPayload {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	if withToken {
-		request.Header.Set("X-Internal-Token", c.token)
-	}
+	request.Header.Set("X-Internal-Token", c.token)
 
 	response, err := c.http.Do(request)
 	if err != nil {

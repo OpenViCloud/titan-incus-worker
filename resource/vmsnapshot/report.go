@@ -1,4 +1,4 @@
-// Package vmsnapshot runs the VM snapshot provider commands (create, revert, delete) and the zone's VM snapshot
+// Package vmsnapshot runs the VM snapshot provider commands (create, revert, delete) and the cluster's VM snapshot
 // reconciler.
 package vmsnapshot
 
@@ -61,7 +61,6 @@ type snapshotPayload struct {
 	VmId               string `json:"vmId"`
 	ExternalSnapshotId string `json:"externalSnapshotId"`
 	ProjectName        string `json:"projectName"`
-	ZoneId             string `json:"zoneId"`
 }
 
 func decodeSnapshot(leased command.Leased) (snapshotPayload, string, string, error) {

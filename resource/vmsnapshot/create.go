@@ -18,18 +18,17 @@ type createPayload struct {
 	ExternalVmId string `json:"externalVmId"`
 	Name         string `json:"name"`
 	ProjectName  string `json:"projectName"`
-	ZoneId       string `json:"zoneId"`
 }
 
 // Create runs vm-snapshot.create. Incus has made it once the operation returns, so it reports Created with the
 // provider id "<instance>/<snapshot>": the create is done.
 type Create struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewCreate(cp *controlplane.Client, zones cluster.Zones) *Create {
-	return &Create{cp: cp, zones: zones}
+func NewCreate(cp *controlplane.Client, clusters cluster.Clusters) *Create {
+	return &Create{cp: cp, clusters: clusters}
 }
 
 func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -45,11 +44,11 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return command.Permanent(err)
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	err = zone.Provider.CreateInstanceSnapshot(ctx, payload.ProjectName, payload.ExternalVmId, name)
+	err = cl.Provider.CreateInstanceSnapshot(ctx, payload.ProjectName, payload.ExternalVmId, name)
 	// A duplicate fails in the operation, not with a 409 (lab-storage 05); the name is ours.
 	isOurs := err != nil && provider.IsInstanceSnapshotAlreadyExists(err)
 	if err != nil && !isOurs {
@@ -71,21 +70,21 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 		return err
 	}
 	report := requestFailed(reasonCreateFailed, cause)
-	report.ExternalId = h.existingSnapshot(ctx, leased.ZoneId, payload)
+	report.ExternalId = h.existingSnapshot(ctx, leased.ClusterId, payload)
 	return sendStatus(ctx, h.cp, payload.VmId, payload.SnapshotId, report)
 }
 
 // existingSnapshot returns the snapshot's provider id when Incus has it, "" when it does not or cannot be read.
-func (h *Create) existingSnapshot(ctx context.Context, zoneId string, payload createPayload) string {
+func (h *Create) existingSnapshot(ctx context.Context, clusterId string, payload createPayload) string {
 	name, err := provider.SnapshotName(payload.SnapshotId)
 	if err != nil || payload.ProjectName == "" || payload.ExternalVmId == "" {
 		return ""
 	}
-	zone, err := h.zones.Zone(ctx, zoneId)
+	cl, err := h.clusters.Cluster(ctx, clusterId)
 	if err != nil {
 		return ""
 	}
-	if err := zone.Provider.GetInstanceSnapshot(ctx, payload.ProjectName, payload.ExternalVmId, name); err != nil {
+	if err := cl.Provider.GetInstanceSnapshot(ctx, payload.ProjectName, payload.ExternalVmId, name); err != nil {
 		return ""
 	}
 	return provider.SnapshotId(payload.ExternalVmId, name)

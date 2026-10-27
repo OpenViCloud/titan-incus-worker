@@ -13,7 +13,7 @@ import (
 	incus "github.com/lxc/incus/v7/client"
 )
 
-// Credentials: how to reach one zone's cluster. Never logged: the key is Titan's identity.
+// Credentials: how to reach one cluster. Never logged: the key is Titan's identity.
 type Credentials struct {
 	Endpoint             string
 	ServerFingerprint    string

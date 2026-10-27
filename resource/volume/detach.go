@@ -14,12 +14,12 @@ import (
 // Detach runs volume.detach. The command names no VM: the volume's used_by does. Each instance using it gets a PUT
 // without the volume's disk device (lab-storage 04b). It reports what Incus then shows.
 type Detach struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewDetach(cp *controlplane.Client, zones cluster.Zones) *Detach {
-	return &Detach{cp: cp, zones: zones}
+func NewDetach(cp *controlplane.Client, clusters cluster.Clusters) *Detach {
+	return &Detach{cp: cp, clusters: clusters}
 }
 
 func (h *Detach) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -31,12 +31,12 @@ func (h *Detach) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if !isComplete {
 		return command.Permanent(fmt.Errorf("volume.detach payload lacks volumeId, externalVolumeId or projectName"))
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	pool := provider.StoragePoolOrDefault(zone.StoragePool)
-	volume, err := zone.Provider.GetVolume(ctx, payload.ProjectName, pool, payload.ExternalVolumeId)
+	pool := provider.StoragePoolOrDefault(cl.StoragePool)
+	volume, err := cl.Provider.GetVolume(ctx, payload.ProjectName, pool, payload.ExternalVolumeId)
 	if provider.IsNotFound(err) {
 		return command.Permanent(err)
 	}
@@ -44,17 +44,17 @@ func (h *Detach) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 		return err
 	}
 	for _, instance := range InstancesUsing(volume.UsedBy) {
-		if err := removeDisk(ctx, zone.Provider, instance.Project, instance.Name, payload.ExternalVolumeId); err != nil {
+		if err := removeDisk(ctx, cl.Provider, instance.Project, instance.Name, payload.ExternalVolumeId); err != nil {
 			return err
 		}
 	}
-	return reportWhatIncusShows(ctx, h.cp, zone.Provider, payload, pool)
+	return reportWhatIncusShows(ctx, h.cp, cl.Provider, payload, pool)
 }
 
 // GiveUp reports the request failed, carrying what Incus shows: a detach that happened while its report failed is then
 // fulfilled by it, and only one that did not is withdrawn.
 func (h *Detach) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
-	return giveUp(ctx, h.cp, h.zones, leased, cause, reasonDetachFailed)
+	return giveUp(ctx, h.cp, h.clusters, leased, cause, reasonDetachFailed)
 }
 
 // removeDisk drops every disk device of the instance whose source is the volume. An instance gone has no device left.

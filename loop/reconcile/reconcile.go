@@ -1,11 +1,10 @@
-// Package reconcile is the reconciler loop: every interval, each kind in each zone that has a cluster
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md#reconciler-is-a-worker-ticker). An error skips that zone and kind for the
+// Package reconcile is the reconciler loop: every interval, each kind in each cluster the control plane configures
+// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md#reconciler-is-a-worker-ticker). An error skips that cluster and kind for the
 // cycle; the loop never exits on one.
 package reconcile
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"time"
 
@@ -13,8 +12,8 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/incus/cluster"
 )
 
-// zoneInfo mirrors the control plane's ZoneInfo on GET /v1/zones.
-type zoneInfo struct {
+// clusterInfo mirrors the control plane's InternalClusterResponse on GET /internal/clusters.
+type clusterInfo struct {
 	Id   string `json:"id"`
 	Name string `json:"name"`
 }
@@ -22,30 +21,20 @@ type zoneInfo struct {
 // Kind is one resource's reconciler. main.go registers them, so this loop knows no resource.
 type Kind struct {
 	Name      string
-	Reconcile func(ctx context.Context, cp *controlplane.Client, zone *cluster.Zone, zoneId string, logger *slog.Logger) error
+	Reconcile func(ctx context.Context, cp *controlplane.Client, cl *cluster.Cluster, clusterId string, logger *slog.Logger) error
 }
 
 type Runner struct {
 	cp       *controlplane.Client
-	zones    cluster.Zones
+	clusters cluster.Clusters
 	interval time.Duration
 	logger   *slog.Logger
-	// kinds run in this order in each zone.
+	// kinds run in this order in each cluster.
 	kinds []Kind
-
-	// Zones already logged as having no cluster, so a zone without one is not logged every cycle.
-	loggedWithoutCluster map[string]bool
 }
 
-func NewRunner(cp *controlplane.Client, zones cluster.Zones, kinds []Kind, interval time.Duration, logger *slog.Logger) *Runner {
-	return &Runner{
-		cp:                   cp,
-		zones:                zones,
-		interval:             interval,
-		logger:               logger,
-		kinds:                kinds,
-		loggedWithoutCluster: map[string]bool{},
-	}
+func NewRunner(cp *controlplane.Client, clusters cluster.Clusters, kinds []Kind, interval time.Duration, logger *slog.Logger) *Runner {
+	return &Runner{cp: cp, clusters: clusters, interval: interval, logger: logger, kinds: kinds}
 }
 
 // Run reconciles at once, then every interval, until ctx ends.
@@ -62,50 +51,42 @@ func (r *Runner) Run(ctx context.Context) {
 	}
 }
 
-// Cycle runs every kind once in every zone.
+// Cycle runs every kind once in every cluster.
 func (r *Runner) Cycle(ctx context.Context) {
-	var zones []zoneInfo
-	if err := r.cp.GetPublicJSON(ctx, "/v1/zones", &zones); err != nil {
+	var clusters []clusterInfo
+	if err := r.cp.GetJSON(ctx, "/internal/clusters", &clusters); err != nil {
 		if ctx.Err() == nil {
-			r.logger.Warn("reconcile: listing zones failed; skipping this cycle", "error", err)
+			r.logger.Warn("reconcile: listing clusters failed; skipping this cycle", "error", err)
 		}
 		return
 	}
-	for _, zone := range zones {
+	for _, cl := range clusters {
 		if ctx.Err() != nil {
 			return
 		}
-		r.reconcileZone(ctx, zone.Id)
+		r.reconcileCluster(ctx, cl.Id)
 	}
 }
 
-func (r *Runner) reconcileZone(ctx context.Context, zoneId string) {
-	zone, err := r.zones.Zone(ctx, zoneId)
-	if errors.Is(err, cluster.ErrNoCluster) {
-		if !r.loggedWithoutCluster[zoneId] {
-			r.logger.Info("reconcile: zone has no cluster; skipping it until it has one", "zoneId", zoneId)
-			r.loggedWithoutCluster[zoneId] = true
-		}
-		return
-	}
+func (r *Runner) reconcileCluster(ctx context.Context, clusterId string) {
+	cl, err := r.clusters.Cluster(ctx, clusterId)
 	if err != nil {
-		r.logger.Warn("reconcile: zone's cluster unreachable; skipping it this cycle", "zoneId", zoneId, "error", err)
+		r.logger.Warn("reconcile: cannot reach the cluster; skipping it this cycle", "clusterId", clusterId, "error", err)
 		return
 	}
-	delete(r.loggedWithoutCluster, zoneId)
 
-	// One line per zone and cycle says how long each kind took: a kind stuck on a slow Incus read shows here.
-	zoneStartedAt := time.Now()
+	// One line per cluster and cycle says how long each kind took: a kind stuck on a slow Incus read shows here.
+	clusterStartedAt := time.Now()
 	durations := []any{}
 	for _, kind := range r.kinds {
-		kindLogger := r.logger.With("kind", kind.Name, "zoneId", zoneId)
+		kindLogger := r.logger.With("kind", kind.Name, "clusterId", clusterId)
 		kindStartedAt := time.Now()
-		err := kind.Reconcile(ctx, r.cp, zone, zoneId, kindLogger)
+		err := kind.Reconcile(ctx, r.cp, cl, clusterId, kindLogger)
 		durations = append(durations, slog.Int64(kind.Name, time.Since(kindStartedAt).Milliseconds()))
 		if err != nil && ctx.Err() == nil {
 			kindLogger.Warn("reconcile failed; skipping it this cycle", "error", err)
 		}
 	}
-	r.logger.Info("reconcile zone done", "zoneId", zoneId, "totalMs", time.Since(zoneStartedAt).Milliseconds(),
+	r.logger.Info("reconcile cluster done", "clusterId", clusterId, "totalMs", time.Since(clusterStartedAt).Milliseconds(),
 		slog.Group("durationsMs", durations...))
 }

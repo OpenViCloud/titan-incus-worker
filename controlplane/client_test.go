@@ -9,24 +9,19 @@ import (
 	"testing"
 )
 
-func TestClient_SendsTheTokenOnInternalRoutesOnly(t *testing.T) {
-	tokens := map[string]string{}
+func TestClient_SendsTheInternalToken(t *testing.T) {
+	var token string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tokens[r.URL.Path] = r.Header.Get("X-Internal-Token")
+		token = r.Header.Get("X-Internal-Token")
 		w.Write([]byte("[]"))
 	}))
 	defer server.Close()
-	client := NewWithHTTPClient(server.URL, "secret", server.Client())
 	var ignored []any
 
-	client.GetJSON(context.Background(), "/internal/reconcile/vms", &ignored)
-	client.GetPublicJSON(context.Background(), "/v1/zones", &ignored)
+	NewWithHTTPClient(server.URL, "secret", server.Client()).GetJSON(context.Background(), "/internal/clusters", &ignored)
 
-	if tokens["/internal/reconcile/vms"] != "secret" {
-		t.Fatal("internal route without the token")
-	}
-	if tokens["/v1/zones"] != "" {
-		t.Fatal("the internal token went to a public route")
+	if token != "secret" {
+		t.Fatalf("token %q, want the internal token", token)
 	}
 }
 

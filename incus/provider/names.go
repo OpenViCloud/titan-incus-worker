@@ -86,7 +86,7 @@ func SplitSnapshotId(externalId string) (string, string, error) {
 	return parent, snapshot, nil
 }
 
-// DefaultStoragePool is the pool a zone uses when its cluster names none (the lab's pool).
+// DefaultStoragePool is the pool a cluster uses when it names none (the lab's pool).
 const DefaultStoragePool = "default"
 
 func StoragePoolOrDefault(pool string) string {

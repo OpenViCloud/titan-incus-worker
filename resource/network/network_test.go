@@ -18,12 +18,12 @@ import (
 const (
 	networkId = "11111111-2222-3333-4444-555555555555"
 	project   = "t-0123456789abcdef0123456789abcdef"
-	zoneId    = "mock"
+	clusterId = "mock"
 )
 
 func leased(kind string, payload map[string]any) command.Leased {
 	encoded, _ := json.Marshal(payload)
-	return command.Leased{Kind: kind, ZoneId: zoneId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
+	return command.Leased{Kind: kind, ClusterId: clusterId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
 }
 
 func createLeased(cidr string) command.Leased {
@@ -32,7 +32,7 @@ func createLeased(cidr string) command.Leased {
 
 func createLeasedWithIpv6(cidr string, subnet string, router string) command.Leased {
 	return leased("network.create", map[string]any{
-		"networkId": networkId, "name": "backend", "projectName": project, "zoneId": zoneId, "cidr": cidr,
+		"networkId": networkId, "name": "backend", "projectName": project, "cidr": cidr,
 		"defaultEgressPolicy": "Allow", "publicIpv6Subnet": subnet, "publicIpv6RouterAddress": router,
 	})
 }
@@ -57,8 +57,8 @@ func ipv6Network(config map[string]string) api.Network {
 	return api.Network{Name: "net-" + networkId, Project: project, Status: "Created", NetworkPut: api.NetworkPut{Config: held}}
 }
 
-func ovnUplinkZone(p *testsupport.Provider, uplink string) cluster.Fixed {
-	return cluster.Fixed{zoneId: {Provider: p, OvnUplinkNetwork: uplink}}
+func ovnUplinkCluster(p *testsupport.Provider, uplink string) cluster.Fixed {
+	return cluster.Fixed{clusterId: {Provider: p, OvnUplinkNetwork: uplink}}
 }
 
 func onlyBody(t *testing.T, cp *testsupport.ControlPlane) map[string]any {
@@ -99,7 +99,7 @@ func TestRouterAddress_RefusesWhatCannotHoldARouterAndAVm(t *testing.T) {
 
 func createLeasedWithPolicies(ingress string, egress string) command.Leased {
 	payload := map[string]any{
-		"networkId": networkId, "name": "backend", "projectName": project, "zoneId": zoneId, "cidr": "10.40.0.0/24",
+		"networkId": networkId, "name": "backend", "projectName": project, "cidr": "10.40.0.0/24",
 		"defaultEgressPolicy": egress,
 	}
 	if ingress != "" {
@@ -108,15 +108,15 @@ func createLeasedWithPolicies(ingress string, egress string) command.Leased {
 	return leased("network.create", payload)
 }
 
-// A network without public IPv6 has no uplink, even where the zone has one: OVN keeps each one to itself and lets two
+// A network without public IPv6 has no uplink, even where the cluster has one: OVN keeps each one to itself and lets two
 // tenants use the same CIDR (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/vm-network.md#no-ipv4-egress).
 func TestCreate_MakesAnIsolatedOvnNetwork_WithItsAcl_AndReportsCreated(t *testing.T) {
 	for _, uplink := range []string{"ovnup", ""} {
 		cp := testsupport.NewControlPlane(t)
 		p := testsupport.NewProvider()
-		zones := cluster.Fixed{zoneId: {Provider: p, OvnUplinkNetwork: uplink}}
+		clusters := cluster.Fixed{clusterId: {Provider: p, OvnUplinkNetwork: uplink}}
 
-		err := NewCreate(cp.Client(), zones).Run(context.Background(), createLeased("10.40.0.0/24"), testsupport.DiscardLogger())
+		err := NewCreate(cp.Client(), clusters).Run(context.Background(), createLeased("10.40.0.0/24"), testsupport.DiscardLogger())
 
 		if err != nil {
 			t.Fatal(err)
@@ -149,15 +149,15 @@ func TestCreate_MakesAnIsolatedOvnNetwork_WithItsAcl_AndReportsCreated(t *testin
 	}
 }
 
-// A network with public IPv6 goes on the zone's uplink and carries its /64; its router takes the address the static
+// A network with public IPv6 goes on the cluster's uplink and carries its /64; its router takes the address the static
 // OVH route of that /64 points to (https://github.com/OpenViCloud/titan-ops/blob/main/docs/infra/incus/design.md#ipv6-ovn-uplink). IPv4 stays as on any other network.
-func TestCreate_WithPublicIpv6_UsesTheZonesUplink_AndPinsTheRouter(t *testing.T) {
+func TestCreate_WithPublicIpv6_UsesTheClustersUplink_AndPinsTheRouter(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	// Incus may write an address its own way; the read-back compares addresses, not text.
 	p.Networks = []api.Network{ipv6Network(map[string]string{"volatile.network.ipv6.address": "2001:41d0:0d00:d400:0:0:0:170"})}
 
-	err := NewCreate(cp.Client(), ovnUplinkZone(p, "ovnup")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", ipv6Subnet, ipv6Router), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), ovnUplinkCluster(p, "ovnup")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", ipv6Subnet, ipv6Router), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -184,11 +184,11 @@ func TestCreate_WithPublicIpv6_UsesTheZonesUplink_AndPinsTheRouter(t *testing.T)
 	}
 }
 
-func TestCreate_WithPublicIpv6_ZoneWithoutUplink_IsPermanent_AndTouchesNothing(t *testing.T) {
+func TestCreate_WithPublicIpv6_ClusterWithoutUplink_IsPermanent_AndTouchesNothing(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewCreate(cp.Client(), ovnUplinkZone(p, "")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", ipv6Subnet, ipv6Router), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), ovnUplinkCluster(p, "")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", ipv6Subnet, ipv6Router), testsupport.DiscardLogger())
 
 	if err == nil || command.IsRetryable(err) || !strings.Contains(err.Error(), "uplink") {
 		t.Fatalf("want a permanent error naming the uplink, got %v", err)
@@ -220,7 +220,7 @@ func TestCreate_WithPublicIpv6_WhatCannotBeApplied_IsPermanent_AndTouchesNothing
 		cp := testsupport.NewControlPlane(t)
 		p := testsupport.NewProvider()
 
-		err := NewCreate(cp.Client(), ovnUplinkZone(p, "ovnup")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", c.subnet, c.router), testsupport.DiscardLogger())
+		err := NewCreate(cp.Client(), ovnUplinkCluster(p, "ovnup")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", c.subnet, c.router), testsupport.DiscardLogger())
 
 		if err == nil || command.IsRetryable(err) {
 			t.Errorf("%s: want permanent, got %v", c.name, err)
@@ -247,7 +247,7 @@ func TestCreate_WithPublicIpv6_IncusHoldsSomethingElse_IsPermanent(t *testing.T)
 		p := testsupport.NewProvider()
 		p.Networks = []api.Network{ipv6Network(held)}
 
-		err := NewCreate(cp.Client(), ovnUplinkZone(p, "ovnup")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", ipv6Subnet, ipv6Router), testsupport.DiscardLogger())
+		err := NewCreate(cp.Client(), ovnUplinkCluster(p, "ovnup")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", ipv6Subnet, ipv6Router), testsupport.DiscardLogger())
 
 		if err == nil || command.IsRetryable(err) {
 			t.Errorf("%s: want permanent, got %v", name, err)
@@ -269,7 +269,7 @@ func TestCreate_WithPublicIpv6_WrongNetworkCannotBeDeleted_IsRetryable(t *testin
 	p.Networks = []api.Network{ipv6Network(map[string]string{"volatile.network.ipv6.address": "2001:41d0:d00:d400::171"})}
 	p.DeleteNetworkErr = errors.New("incus unreachable")
 
-	err := NewCreate(cp.Client(), ovnUplinkZone(p, "ovnup")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", ipv6Subnet, ipv6Router), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), ovnUplinkCluster(p, "ovnup")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", ipv6Subnet, ipv6Router), testsupport.DiscardLogger())
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -284,7 +284,7 @@ func TestCreate_GiveUp_CannotListNetworks_IsRetryable_AndTellsNothing(t *testing
 	p.PutACL(project, api.NetworkACL{NetworkACLPost: api.NetworkACLPost{Name: "acl-" + networkId}})
 	p.ListNetworksErr = errors.New("incus unreachable")
 
-	err := NewCreate(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).GiveUp(context.Background(), createLeased("10.40.0.0/24"), errors.New("gave up"), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).GiveUp(context.Background(), createLeased("10.40.0.0/24"), errors.New("gave up"), testsupport.DiscardLogger())
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -301,7 +301,7 @@ func TestCreate_WithPublicIpv6_NetworkReadFails_IsRetryable(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewCreate(cp.Client(), ovnUplinkZone(p, "ovnup")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", ipv6Subnet, ipv6Router), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), ovnUplinkCluster(p, "ovnup")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", ipv6Subnet, ipv6Router), testsupport.DiscardLogger())
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -328,7 +328,7 @@ func TestCreate_WithPublicIpv6_AlreadyOurs_IsCheckedToo(t *testing.T) {
 		p.Networks = []api.Network{ipv6Network(c.held)}
 		p.CreateNetworkErr = api.StatusErrorf(http.StatusConflict, `Network "net-%s" already exists`, networkId)
 
-		err := NewCreate(cp.Client(), ovnUplinkZone(p, "ovnup")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", ipv6Subnet, ipv6Router), testsupport.DiscardLogger())
+		err := NewCreate(cp.Client(), ovnUplinkCluster(p, "ovnup")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", ipv6Subnet, ipv6Router), testsupport.DiscardLogger())
 
 		if c.wantErr {
 			if err == nil || command.IsRetryable(err) {
@@ -368,7 +368,7 @@ func TestCreate_MergesTheTwoPolicies(t *testing.T) {
 		cp := testsupport.NewControlPlane(t)
 		p := testsupport.NewProvider()
 
-		err := NewCreate(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).Run(context.Background(), createLeasedWithPolicies(c.ingress, c.egress), testsupport.DiscardLogger())
+		err := NewCreate(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).Run(context.Background(), createLeasedWithPolicies(c.ingress, c.egress), testsupport.DiscardLogger())
 
 		if err != nil {
 			t.Fatal(err)
@@ -386,7 +386,7 @@ func TestCreate_UnknownPolicy_IsPermanent(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewCreate(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).Run(context.Background(), createLeasedWithPolicies("Maybe", "Allow"), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).Run(context.Background(), createLeasedWithPolicies("Maybe", "Allow"), testsupport.DiscardLogger())
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want permanent, got %v", err)
@@ -402,7 +402,7 @@ func TestCreate_WithoutACidr_ReportsTheSubnetIncusPicked(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.Networks = []api.Network{{Name: "net-" + networkId, Project: project, NetworkPut: api.NetworkPut{Config: map[string]string{"ipv4.address": "10.101.0.1/24"}}}}
 
-	err := NewCreate(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).Run(context.Background(), createLeased(""), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).Run(context.Background(), createLeased(""), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -421,7 +421,7 @@ func TestCreate_GiveUp_WithAnIncusChosenSubnet_ReportsThatSubnet(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.Networks = []api.Network{{Name: "net-" + networkId, Project: project, NetworkPut: api.NetworkPut{Config: map[string]string{"ipv4.address": "10.102.0.1/24"}}}}
 
-	err := NewCreate(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).GiveUp(context.Background(), createLeased(""), errors.New("gave up"), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).GiveUp(context.Background(), createLeased(""), errors.New("gave up"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -440,7 +440,7 @@ func TestCreate_GiveUp_WithoutTheNetwork_DeletesTheAcl(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.PutACL(project, api.NetworkACL{NetworkACLPost: api.NetworkACLPost{Name: "acl-" + networkId}})
 
-	err := NewCreate(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).GiveUp(context.Background(), createLeased("10.40.0.0/24"), errors.New("gave up"), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).GiveUp(context.Background(), createLeased("10.40.0.0/24"), errors.New("gave up"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -459,7 +459,7 @@ func TestCreate_GiveUp_WithTheNetwork_KeepsTheAcl(t *testing.T) {
 	p.PutACL(project, api.NetworkACL{NetworkACLPost: api.NetworkACLPost{Name: "acl-" + networkId}})
 	p.Networks = []api.Network{{Name: "net-" + networkId, Project: project, NetworkPut: api.NetworkPut{Config: map[string]string{"ipv4.address": "10.40.0.1/24"}}}}
 
-	err := NewCreate(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).GiveUp(context.Background(), createLeased("10.40.0.0/24"), errors.New("gave up"), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).GiveUp(context.Background(), createLeased("10.40.0.0/24"), errors.New("gave up"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -497,7 +497,7 @@ func TestCreate_NetworkAndAclExist_IsOurs_AndTheNetworkGetsItsAclSettings(t *tes
 	}}}
 	p.CreateNetworkErr = api.StatusErrorf(http.StatusConflict, `Network "net-%s" already exists`, networkId)
 
-	err := NewCreate(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).Run(context.Background(), createLeasedWithPolicies("Deny", "Allow"), logger)
+	err := NewCreate(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).Run(context.Background(), createLeasedWithPolicies("Deny", "Allow"), logger)
 
 	if err != nil {
 		t.Fatal(err)
@@ -526,7 +526,7 @@ func TestCreate_NetworkExistsAlreadyRight_IsNotWritten(t *testing.T) {
 	}}}}
 	p.CreateNetworkErr = api.StatusErrorf(http.StatusConflict, `Network "net-%s" already exists`, networkId)
 
-	err := NewCreate(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).Run(context.Background(), createLeased("10.40.0.0/24"), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).Run(context.Background(), createLeased("10.40.0.0/24"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -541,7 +541,7 @@ func TestCreate_AclCreateFails_NoNetwork(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.CreateACLErr = errors.New("boom")
 
-	err := NewCreate(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).Run(context.Background(), createLeased("10.40.0.0/24"), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).Run(context.Background(), createLeased("10.40.0.0/24"), testsupport.DiscardLogger())
 
 	if err == nil {
 		t.Fatal("want the error")
@@ -555,7 +555,7 @@ func TestCreate_InvalidCidr_IsPermanent(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := NewCreate(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).Run(context.Background(), createLeased("10.0.0.0/32"), testsupport.DiscardLogger())
+	err := NewCreate(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).Run(context.Background(), createLeased("10.0.0.0/32"), testsupport.DiscardLogger())
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want permanent, got %v", err)
@@ -567,7 +567,7 @@ func TestCreate_InvalidCidr_IsPermanent(t *testing.T) {
 
 func deleteLeased() command.Leased {
 	return leased("network.delete", map[string]any{
-		"networkId": networkId, "externalNetworkId": "net-" + networkId, "projectName": project, "zoneId": zoneId,
+		"networkId": networkId, "externalNetworkId": "net-" + networkId, "projectName": project,
 	})
 }
 
@@ -578,7 +578,7 @@ func TestDelete_DeletesTheNetworkThenItsAcl(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.PutACL(project, api.NetworkACL{NetworkACLPost: api.NetworkACLPost{Name: "acl-" + networkId}})
 
-	err := NewDelete(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
+	err := NewDelete(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -601,7 +601,7 @@ func TestDelete_Gone_ReportsDeleted(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.DeleteNetworkErr = testsupport.NotFound("Network not found")
 
-	err := NewDelete(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).Run(context.Background(), deleteLeased(), logger)
+	err := NewDelete(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).Run(context.Background(), deleteLeased(), logger)
 
 	if err != nil {
 		t.Fatal(err)
@@ -619,7 +619,7 @@ func TestDelete_AclDeleteFails_DoesNotReportDeleted(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.DeleteACLErr = errors.New("boom")
 
-	err := NewDelete(cp.Client(), cluster.Fixed{zoneId: {Provider: p}}).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
+	err := NewDelete(cp.Client(), cluster.Fixed{clusterId: {Provider: p}}).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
 
 	if err == nil {
 		t.Fatal("want the error")
@@ -682,7 +682,7 @@ func TestDecideReport(t *testing.T) {
 
 func TestReconcile_SendsTheIncusStatusAsIs(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond(http.MethodGet, "/internal/reconcile/networks?zoneId=mock", http.StatusOK,
+	cp.Respond(http.MethodGet, "/internal/reconcile/networks?clusterId=mock", http.StatusOK,
 		`[{"id":"`+networkId+`","externalId":"net-a","currentState":null,"currentExistence":"Exists"}]`)
 	p := testsupport.NewProvider()
 	p.Networks = []api.Network{{Name: "net-a", Status: "Created", Project: project}}
@@ -705,7 +705,7 @@ func TestReconcile_SendsTheIncusStatusAsIs(t *testing.T) {
 
 func TestReconcile_NetworkGone_IsNotFound_NeverDeleted(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond(http.MethodGet, "/internal/reconcile/networks?zoneId=mock", http.StatusOK,
+	cp.Respond(http.MethodGet, "/internal/reconcile/networks?clusterId=mock", http.StatusOK,
 		`[{"id":"`+networkId+`","externalId":"net-gone","currentState":"Created","currentExistence":"Exists"}]`)
 	p := testsupport.NewProvider()
 
@@ -725,7 +725,7 @@ func TestReconcile_NetworkGone_IsNotFound_NeverDeleted(t *testing.T) {
 
 func TestReconcile_NetworkReadFails_ReportsNothing(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond(http.MethodGet, "/internal/reconcile/networks?zoneId=mock", http.StatusOK,
+	cp.Respond(http.MethodGet, "/internal/reconcile/networks?clusterId=mock", http.StatusOK,
 		`[{"id":"`+networkId+`","externalId":"net-a","currentState":"Created","currentExistence":"Exists"}]`)
 	p := testsupport.NewProvider()
 	p.ListNetworksErr = errors.New("incus unreachable")

@@ -13,7 +13,7 @@ import (
 
 const connectionPath = "/internal/clusters/mock/connection"
 
-func TestZone_NoClusterRow_IsErrNoCluster_AndPermanent(t *testing.T) {
+func TestCluster_NoClusterRow_IsErrNoCluster_AndPermanent(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	cp.Respond(http.MethodGet, connectionPath, http.StatusNotFound, `{"code":"CLUSTER_NOT_FOUND"}`)
 	resolver := NewResolver(cp.Client(), func(provider.Credentials) (provider.Provider, error) {
@@ -21,7 +21,7 @@ func TestZone_NoClusterRow_IsErrNoCluster_AndPermanent(t *testing.T) {
 		return nil, nil
 	}, testsupport.DiscardLogger())
 
-	_, err := resolver.Zone(context.Background(), "mock")
+	_, err := resolver.Cluster(context.Background(), "mock")
 
 	var answer interface{ Permanent() bool }
 	saysPermanent := errors.As(err, &answer) && answer.Permanent()
@@ -30,7 +30,7 @@ func TestZone_NoClusterRow_IsErrNoCluster_AndPermanent(t *testing.T) {
 	}
 }
 
-func TestZone_ConnectsWithTheCredentials_ThenServesFromTheCache(t *testing.T) {
+func TestCluster_ConnectsWithTheCredentials_ThenServesFromTheCache(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	cp.Respond(http.MethodGet, connectionPath, http.StatusOK,
 		`{"endpoint":"https://incus:8443","serverFingerprint":"ab","clientCertificatePem":"CERT","clientKeyPem":"KEY","ovnUplinkNetwork":"ovnup","storagePool":null}`)
@@ -44,24 +44,24 @@ func TestZone_ConnectsWithTheCredentials_ThenServesFromTheCache(t *testing.T) {
 	now := time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC)
 	resolver.now = func() time.Time { return now }
 
-	first, err := resolver.Zone(context.Background(), "mock")
+	first, err := resolver.Cluster(context.Background(), "mock")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver.Zone(context.Background(), "mock")
+	resolver.Cluster(context.Background(), "mock")
 	now = now.Add(cacheFor + time.Second)
-	resolver.Zone(context.Background(), "mock")
+	resolver.Cluster(context.Background(), "mock")
 
 	want := provider.Credentials{Endpoint: "https://incus:8443", ServerFingerprint: "ab", ClientCertificatePem: "CERT", ClientKeyPem: "KEY"}
 	if len(connects) != 2 || connects[0] != want {
 		t.Fatalf("want one connect per cache period with the credentials, got %+v", connects)
 	}
 	if first.OvnUplinkNetwork != "ovnup" || first.StoragePool != "" || first.Provider != fake {
-		t.Fatalf("zone: %+v", first)
+		t.Fatalf("cluster: %+v", first)
 	}
-	connected := logs.Records("connected to the zone's cluster")
-	if len(connected) != 2 || connected[0]["zoneId"] != "mock" || connected[0]["endpoint"] != "https://incus:8443" {
-		t.Fatalf("want one line per connect with the zone and endpoint, got %v", connected)
+	connected := logs.Records("connected to the cluster")
+	if len(connected) != 2 || connected[0]["clusterId"] != "mock" || connected[0]["endpoint"] != "https://incus:8443" {
+		t.Fatalf("want one line per connect with the cluster and endpoint, got %v", connected)
 	}
 	for field, value := range connected[0] {
 		if value == "KEY" || value == "CERT" {

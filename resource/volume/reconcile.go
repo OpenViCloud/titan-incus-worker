@@ -47,23 +47,23 @@ type observedVolume struct {
 	instances []string
 }
 
-// Reconcile observes one zone's volumes and volume snapshots and reports what differs; it never acts on Incus, and it
+// Reconcile observes one cluster's volumes and volume snapshots and reports what differs; it never acts on Incus, and it
 // never reports Deleted: a volume or snapshot gone is NotFound, only Titan's own delete command says Deleted
 // (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#existence-axis). The all-projects volume list has no snapshots
 // (lab-storage 02), so the snapshots of each volume are one more read. A failed read skips what it would have said:
 // reading it as "nothing there" would report everything gone.
-func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, zoneId string, storagePool string, logger *slog.Logger) error {
+func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, storagePool string, logger *slog.Logger) error {
 	pool := provider.StoragePoolOrDefault(storagePool)
 	var rows reconcilableStorage
-	if err := cp.GetJSON(ctx, "/internal/reconcile/volumes?zoneId="+url.QueryEscape(zoneId), &rows); err != nil {
-		return fmt.Errorf("list reconcilable storage of zone %s: %w", zoneId, err)
+	if err := cp.GetJSON(ctx, "/internal/reconcile/volumes?clusterId="+url.QueryEscape(clusterId), &rows); err != nil {
+		return fmt.Errorf("list reconcilable storage of cluster %s: %w", clusterId, err)
 	}
 	if len(rows.Volumes) == 0 && len(rows.Snapshots) == 0 {
 		return nil
 	}
 	volumes, err := p.ListVolumesAllProjects(ctx, pool)
 	if err != nil {
-		return fmt.Errorf("observe volumes of zone %s: %w", zoneId, err)
+		return fmt.Errorf("observe volumes of cluster %s: %w", clusterId, err)
 	}
 	observed := ObserveVolumes(volumes)
 

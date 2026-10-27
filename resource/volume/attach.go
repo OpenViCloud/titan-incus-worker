@@ -21,18 +21,17 @@ type attachPayload struct {
 	ExternalVolumeId string `json:"externalVolumeId"`
 	ExternalVmId     string `json:"externalVmId"`
 	ProjectName      string `json:"projectName"`
-	ZoneId           string `json:"zoneId"`
 }
 
 // Attach runs volume.attach: a disk device named after the volume, hot-plugged by PATCH (lab-storage 04: works on a
 // running VM, and the same PATCH again is a no-op). It reports what Incus then shows: the instances using the volume.
 type Attach struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewAttach(cp *controlplane.Client, zones cluster.Zones) *Attach {
-	return &Attach{cp: cp, zones: zones}
+func NewAttach(cp *controlplane.Client, clusters cluster.Clusters) *Attach {
+	return &Attach{cp: cp, clusters: clusters}
 }
 
 func (h *Attach) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -44,17 +43,17 @@ func (h *Attach) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if !isComplete {
 		return command.Permanent(fmt.Errorf("volume.attach payload lacks volumeId, externalVolumeId, externalVmId or projectName"))
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
 	device := map[string]string{
 		"type":   "disk",
-		"pool":   provider.StoragePoolOrDefault(zone.StoragePool),
+		"pool":   provider.StoragePoolOrDefault(cl.StoragePool),
 		"source": payload.ExternalVolumeId,
 	}
 	patch := api.InstancePut{Devices: map[string]map[string]string{payload.ExternalVolumeId: device}}
-	err = zone.Provider.PatchInstance(ctx, payload.ProjectName, payload.ExternalVmId, patch)
+	err = cl.Provider.PatchInstance(ctx, payload.ProjectName, payload.ExternalVmId, patch)
 	if provider.IsNotFound(err) {
 		// The VM is gone: no later lease can attach to it.
 		return command.Permanent(err)
@@ -62,13 +61,13 @@ func (h *Attach) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return err
 	}
-	return reportWhatIncusShows(ctx, h.cp, zone.Provider, payload, provider.StoragePoolOrDefault(zone.StoragePool))
+	return reportWhatIncusShows(ctx, h.cp, cl.Provider, payload, provider.StoragePoolOrDefault(cl.StoragePool))
 }
 
 // GiveUp reports the request failed, carrying what Incus shows: an attach that happened while its report failed is then
 // fulfilled by it, and only one that did not is withdrawn.
 func (h *Attach) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
-	return giveUp(ctx, h.cp, h.zones, leased, cause, reasonAttachFailed)
+	return giveUp(ctx, h.cp, h.clusters, leased, cause, reasonAttachFailed)
 }
 
 // reportWhatIncusShows reads the volume after an attach or detach and reports it.
@@ -82,13 +81,13 @@ func reportWhatIncusShows(ctx context.Context, cp *controlplane.Client, p provid
 
 // giveUp is the attach's and the detach's: the request failed, plus what Incus shows when it can be read — the volume
 // gone, or the instances using it. Unreadable, the report says only that the request failed.
-func giveUp(ctx context.Context, cp *controlplane.Client, zones cluster.Zones, leased command.Leased, cause error, reason string) error {
+func giveUp(ctx context.Context, cp *controlplane.Client, clusters cluster.Clusters, leased command.Leased, cause error, reason string) error {
 	var payload attachPayload
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
 	report := StatusReport{Report: ReportRequestFailed, Reason: reason, Detail: cause.Error()}
-	observation, read := readAttachment(ctx, zones, leased.ZoneId, payload)
+	observation, read := readAttachment(ctx, clusters, leased.ClusterId, payload)
 	if read {
 		report.Exists = observation.Exists
 		report.AttachedTo = observation.AttachedTo
@@ -97,16 +96,16 @@ func giveUp(ctx context.Context, cp *controlplane.Client, zones cluster.Zones, l
 }
 
 // readAttachment reads whether the volume exists and the instances using it; false when it cannot be read.
-func readAttachment(ctx context.Context, zones cluster.Zones, zoneId string, payload attachPayload) (StatusReport, bool) {
+func readAttachment(ctx context.Context, clusters cluster.Clusters, clusterId string, payload attachPayload) (StatusReport, bool) {
 	if payload.ProjectName == "" || payload.ExternalVolumeId == "" {
 		return StatusReport{}, false
 	}
-	zone, err := zones.Zone(ctx, zoneId)
+	cl, err := clusters.Cluster(ctx, clusterId)
 	if err != nil {
 		return StatusReport{}, false
 	}
-	pool := provider.StoragePoolOrDefault(zone.StoragePool)
-	volume, err := zone.Provider.GetVolume(ctx, payload.ProjectName, pool, payload.ExternalVolumeId)
+	pool := provider.StoragePoolOrDefault(cl.StoragePool)
+	volume, err := cl.Provider.GetVolume(ctx, payload.ProjectName, pool, payload.ExternalVolumeId)
 	if provider.IsNotFound(err) {
 		return Observed(false, nil), true
 	}

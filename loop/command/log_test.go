@@ -35,7 +35,7 @@ func newLoggingLoop(cp *testsupport.ControlPlane, handler Handler, logger *slog.
 func assertCommandFields(t *testing.T, record map[string]any) {
 	t.Helper()
 	want := map[string]any{
-		"commandId": "c1", "leaseId": leaseId, "kind": "vm.create", "key": "vm-provision-x", "zoneId": "mock",
+		"commandId": "c1", "leaseId": leaseId, "kind": "vm.create", "key": "vm-provision-x", "clusterId": "mock",
 		"attempt": float64(1), "maxAttempts": float64(5),
 	}
 	for field, value := range want {

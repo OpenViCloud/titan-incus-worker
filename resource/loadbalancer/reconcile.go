@@ -26,14 +26,14 @@ type ReconcilableLoadBalancer struct {
 	CurrentExistence  string `json:"currentExistence"`
 }
 
-// Reconcile observes one zone's load balancers — one read per network — and reports what differs; it never acts on
+// Reconcile observes one cluster's load balancers — one read per network — and reports what differs; it never acts on
 // Incus. A network Incus no longer has holds none. A failed read of a network skips that network this cycle: reading
 // it as "none" would report every one of them gone. Absent is NotFound, never Deleted
 // (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#existence-axis).
-func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, zoneId string, logger *slog.Logger) error {
+func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error {
 	var rows []ReconcilableLoadBalancer
-	if err := cp.GetJSON(ctx, "/internal/reconcile/load-balancers?zoneId="+url.QueryEscape(zoneId), &rows); err != nil {
-		return fmt.Errorf("list reconcilable load balancers of zone %s: %w", zoneId, err)
+	if err := cp.GetJSON(ctx, "/internal/reconcile/load-balancers?clusterId="+url.QueryEscape(clusterId), &rows); err != nil {
+		return fmt.Errorf("list reconcilable load balancers of cluster %s: %w", clusterId, err)
 	}
 
 	type networkKey struct{ project, network string }

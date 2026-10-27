@@ -234,7 +234,7 @@ func TestDecideReport_SeenAgainAfterNotFound_IsReported(t *testing.T) {
 func TestReconcile_ReportsOnlyChanges_AndSkipsTheProviderWhenTheListIsEmpty(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond(http.MethodGet, "/internal/reconcile/vms?zoneId=mock", http.StatusOK,
+	cp.Respond(http.MethodGet, "/internal/reconcile/vms?clusterId=mock", http.StatusOK,
 		`[{"id":"a","externalId":"vm-a","currentState":"Running","currentExistence":"Exists","ipAddress":"10.40.0.2","publicIpv6Address":null},
 		  {"id":"b","externalId":"vm-b","currentState":null,"currentExistence":"Exists","ipAddress":null,"publicIpv6Address":null}]`)
 	p := testsupport.NewProvider()
@@ -277,7 +277,7 @@ func TestReconcile_ReportsOnlyChanges_AndSkipsTheProviderWhenTheListIsEmpty(t *t
 func TestReconcile_SendsThePublicIpv6_AndLogsIt(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
-	cp.Respond(http.MethodGet, "/internal/reconcile/vms?zoneId=mock", http.StatusOK,
+	cp.Respond(http.MethodGet, "/internal/reconcile/vms?clusterId=mock", http.StatusOK,
 		`[{"id":"a","externalId":"vm-a","currentState":"Running","currentExistence":"Exists","ipAddress":"10.40.0.2","publicIpv6Address":null}]`)
 	p := testsupport.NewProvider()
 	p.VirtualMachines = []api.InstanceFull{

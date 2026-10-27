@@ -64,10 +64,10 @@ func (t Target) upload(key string) api.BackupTarget {
 }
 
 // ObjectKey is where one backup lands. The key alone says what it is, so the bucket is read without the database:
-// incus/<zone>/<tenant>/<vms|volumes>/<id>/<UTC time>.tar.gz. S3 shows an upload only once it is complete, so an
+// incus/<cluster>/<tenant>/<vms|volumes>/<id>/<UTC time>.tar.gz. S3 shows an upload only once it is complete, so an
 // object under the key is a whole backup.
-func ObjectKey(zoneId string, tenantId string, collection string, resourceId string, takenAt time.Time) string {
-	return "incus/" + zoneId + "/" + tenantId + "/" + collection + "/" + resourceId + "/" +
+func ObjectKey(clusterId string, tenantId string, collection string, resourceId string, takenAt time.Time) string {
+	return "incus/" + clusterId + "/" + tenantId + "/" + collection + "/" + resourceId + "/" +
 		takenAt.UTC().Format("20060102T150405Z") + ".tar.gz"
 }
 

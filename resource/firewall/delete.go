@@ -25,12 +25,12 @@ type deletePayload struct {
 // Delete runs firewall-rule.delete: the rule's entry leaves its ACL. Giving up gives the rule back to the tenant
 // (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#abandoned-request).
 type Delete struct {
-	cp    *controlplane.Client
-	zones cluster.Zones
+	cp       *controlplane.Client
+	clusters cluster.Clusters
 }
 
-func NewDelete(cp *controlplane.Client, zones cluster.Zones) *Delete {
-	return &Delete{cp: cp, zones: zones}
+func NewDelete(cp *controlplane.Client, clusters cluster.Clusters) *Delete {
+	return &Delete{cp: cp, clusters: clusters}
 }
 
 func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -46,12 +46,12 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if !found || aclName == "" || entry == "" {
 		return command.Permanent(fmt.Errorf("%q is not a firewall rule provider id (<acl>/<ruleId>)", payload.ExternalRuleId))
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
 
-	acl, etag, err := zone.Provider.GetNetworkACL(ctx, payload.ProjectName, aclName)
+	acl, etag, err := cl.Provider.GetNetworkACL(ctx, payload.ProjectName, aclName)
 	aclIsGone := provider.IsNotFound(err)
 	if err != nil && !aclIsGone {
 		return err
@@ -64,7 +64,7 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 		put := acl.Writable()
 		put.Ingress = without(put.Ingress, entry)
 		put.Egress = without(put.Egress, entry)
-		if err := zone.Provider.UpdateNetworkACL(ctx, payload.ProjectName, aclName, put, etag); err != nil {
+		if err := cl.Provider.UpdateNetworkACL(ctx, payload.ProjectName, aclName, put, etag); err != nil {
 			return err
 		}
 	}

@@ -23,15 +23,15 @@ type volumePayload struct {
 
 // Volume runs volume.backup the way Vm does: a copy of a snapshot is what Incus uploads, then both go.
 type Volume struct {
-	zones   cluster.Zones
-	target  Target
-	objects Objects
-	arrival Arrival
-	now     func() time.Time
+	clusters cluster.Clusters
+	target   Target
+	objects  Objects
+	arrival  Arrival
+	now      func() time.Time
 }
 
-func NewVolume(zones cluster.Zones, target Target, objects Objects) *Volume {
-	return &Volume{zones: zones, target: target, objects: objects, arrival: DefaultArrival, now: time.Now}
+func NewVolume(clusters cluster.Clusters, target Target, objects Objects) *Volume {
+	return &Volume{clusters: clusters, target: target, objects: objects, arrival: DefaultArrival, now: time.Now}
 }
 
 func (h *Volume) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -46,12 +46,12 @@ func (h *Volume) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return command.Permanent(err)
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
 	}
-	p := zone.Provider
-	pool := provider.StoragePoolOrDefault(zone.StoragePool)
+	p := cl.Provider
+	pool := provider.StoragePoolOrDefault(cl.StoragePool)
 	project, volume := payload.ProjectName, payload.ExternalVolumeId
 
 	_, err = p.GetVolume(ctx, project, pool, volume)
@@ -68,7 +68,7 @@ func (h *Volume) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := p.CreateVolumeSnapshot(ctx, project, pool, volume, snapshotName); err != nil {
 		return err
 	}
-	key := ObjectKey(leased.ZoneId, payload.TenantId, "volumes", payload.VolumeId, h.now())
+	key := ObjectKey(leased.ClusterId, payload.TenantId, "volumes", payload.VolumeId, h.now())
 	runErr := copyAndUploadVolume(ctx, p, project, pool, volume, copyName, h.target.upload(key))
 	cleanUp(logger,
 		func(ctx context.Context) error { return deleteVolumeIfThere(ctx, p, project, pool, copyName) },
@@ -110,12 +110,12 @@ func (h *Volume) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	if err != nil {
 		return nil
 	}
-	zone, err := h.zones.Zone(ctx, leased.ZoneId)
+	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return nil
 	}
-	pool := provider.StoragePoolOrDefault(zone.StoragePool)
-	err = removeVolumeLeftovers(ctx, zone.Provider, payload.ProjectName, pool, payload.ExternalVolumeId, copyName)
+	pool := provider.StoragePoolOrDefault(cl.StoragePool)
+	err = removeVolumeLeftovers(ctx, cl.Provider, payload.ProjectName, pool, payload.ExternalVolumeId, copyName)
 	if err != nil {
 		logger.Warn("removing the backup's leftovers failed; the next run removes them", "error", err)
 	}
