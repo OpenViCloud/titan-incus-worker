@@ -1,0 +1,49 @@
+# Lab: a backup copy of a VM snapshot, with and without the attached volume masked (2026-10-28, dev titan-incus,
+# Incus 7.0.1, pool default driver LVM). Project lab-cl3, an empty stopped VM src, a 64 MiB block volume labvol
+# attached with the device the worker's volume.attach writes. The copy request goes through `incus query` (REST) exactly
+# as the worker sends it; the PATCH calls and the local backup go through REST too; snapshot, device remove, export and
+# import use the CLI. The worker's own backup sends a S3 target (not measured here).
+
+== PATCH /1.0/instances/src?project=lab-cl3
+-- request body: {"devices":{"labvol":{"type":"disk","pool":"default","source":"labvol"}}}
+== snapshot create src backup
+== GET /1.0/instances/src/snapshots/backup?project=lab-cl3  -> devices
+{"labvol": {"pool": "default", "source": "labvol", "type": "disk"}, "root": {"path": "/", "pool": "default", "type": "disk"}}
+
+== POST /1.0/instances?project=lab-cl3  (control: the request the worker made until now)
+-- request body: {"name":"bkcontrol","type":"virtual-machine","source":{"type":"copy","source":"src/backup"}}
+== GET /1.0/storage-pools/default/volumes/custom/labvol?project=lab-cl3  -> used_by
+['/1.0/instances/bkcontrol?project=lab-cl3', '/1.0/instances/src?project=lab-cl3']
+
+== POST /1.0/instances?project=lab-cl3  (masked)
+-- request body: {"name":"bkmasked","type":"virtual-machine","source":{"type":"copy","source":"src/backup"},"devices":{"labvol":{"type":"none"}}}
+== used_by (bkcontrol still there)
+['/1.0/instances/bkcontrol?project=lab-cl3', '/1.0/instances/src?project=lab-cl3']
+== GET bkcontrol devices
+{"labvol": {"pool": "default", "source": "labvol", "type": "disk"}, "root": {"path": "/", "pool": "default", "type": "disk"}}
+== GET bkmasked devices
+{"labvol": {"type": "none"}, "root": {"path": "/", "pool": "default", "type": "disk"}}
+
+== DELETE bkcontrol; POST /1.0/instances/bkmasked/backups {"name":"b1","instance_only":true,"optimized_storage":false}
+backup rc=0
+== detach labvol from src while bkmasked exists
+Device labvol removed from src
+used_by []
+
+# Restore of the masked copy's archive: run 1 keeps src (still holding labvol), run 2 deletes src first. Same setup
+# each time; labvol exists during import in both runs.
+== run 1: incus export bkmasked --instance-only; backup/index.yaml devices
+{'labvol': {'type': 'none'}, 'root': {'path': '/', 'pool': 'default', 'type': 'disk'}}
+== run 1: incus import as restored: rc=0
+== run 1: PATCH /1.0/instances/restored?project=lab-cl3
+-- request body: {"devices":{"labvol":{"type":"disk","pool":"default","source":"labvol"}}}
+Error: Failed add validation for device "labvol": Cannot add un-shared custom storage block volume to more than one instance
+reattach rc=1
+{"labvol": {"type": "none"}, "root": {"path": "/", "pool": "default", "type": "disk"}}
+used_by ['/1.0/instances/src?project=lab-cl3']
+# (the copy made from the snapshot is not checked that way: bkcontrol got the device)
+== run 2: export as in run 1; incus delete -f src; incus import as restored: rc=0
+== run 2: PATCH /1.0/instances/restored?project=lab-cl3 (same body)
+reattach rc=0
+{"labvol": {"pool": "default", "source": "labvol", "type": "disk"}, "root": {"path": "/", "pool": "default", "type": "disk"}}
+used_by ['/1.0/instances/restored?project=lab-cl3']

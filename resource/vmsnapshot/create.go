@@ -84,7 +84,7 @@ func (h *Create) existingSnapshot(ctx context.Context, clusterId string, payload
 	if err != nil {
 		return ""
 	}
-	if err := cl.Provider.GetInstanceSnapshot(ctx, payload.ProjectName, payload.ExternalVmId, name); err != nil {
+	if _, err := cl.Provider.GetInstanceSnapshot(ctx, payload.ProjectName, payload.ExternalVmId, name); err != nil {
 		return ""
 	}
 	return provider.SnapshotId(payload.ExternalVmId, name)
