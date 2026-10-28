@@ -136,6 +136,40 @@ func TestVm_BacksUpACopyOfASnapshot_NotTheRunningDisk_ToTheTargetsKey(t *testing
 	}
 }
 
+// An attached volume has a backup of its own. A copy that kept the volume's device would use the volume for the whole
+// upload: Incus lists the copy in the volume's used_by, and the reconciler reports the volume attached to it.
+func TestVm_TheCopyHoldsNoAttachedVolume_KeepsEveryOtherDevice(t *testing.T) {
+	p := testsupport.NewProvider()
+	runningVm(p)
+	p.Instances[project+"/"+instanceName].Devices = map[string]map[string]string{
+		"root":        {"type": "disk", "pool": pool, "path": "/"},
+		"eth0":        {"type": "nic", "network": "net-1"},
+		"passthrough": {"type": "unix-block", "source": "/dev/sdz"},
+		"volabcdefgh": {"type": "disk", "pool": pool, "source": "volabcdefgh"},
+	}
+
+	err := newVm(p, target).Run(context.Background(), vmLeased(), testsupport.DiscardLogger())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Copies) != 1 {
+		t.Fatalf("copies: %+v", p.Copies)
+	}
+	devices := p.Copies[0].Devices
+	for name, settings := range devices {
+		if settings["type"] == "disk" && settings["source"] != "" {
+			t.Fatalf("the copy holds volume device %s: %v", name, devices)
+		}
+	}
+	isRootKept := devices["root"]["type"] == "disk" && devices["root"]["path"] == "/"
+	isNicKept := devices["eth0"]["type"] == "nic"
+	isPassthroughKept := devices["passthrough"]["type"] == "unix-block"
+	if !isRootKept || !isNicKept || !isPassthroughKept {
+		t.Fatalf("the copy lost a device that is not a volume: %v", devices)
+	}
+}
+
 // Leftovers of a run that died midway (worker restart, lease lost) are removed first, or the snapshot and the copy
 // would refuse to be made again.
 func TestVm_ARunAfterOneThatDiedMidway_RemovesItsLeftoversFirst(t *testing.T) {

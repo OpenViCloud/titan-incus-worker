@@ -302,11 +302,12 @@ func (p *Incus) CreateInstanceSnapshot(ctx context.Context, project string, inst
 	return nil
 }
 
-func (p *Incus) GetInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) error {
-	if _, _, err := p.server.UseProject(project).GetInstanceSnapshot(instance, snapshot); err != nil {
-		return fmt.Errorf("read snapshot %s/%s in project %s: %w", instance, snapshot, project, err)
+func (p *Incus) GetInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) (*api.InstanceSnapshot, error) {
+	found, _, err := p.server.UseProject(project).GetInstanceSnapshot(instance, snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("read snapshot %s/%s in project %s: %w", instance, snapshot, project, err)
 	}
-	return nil
+	return found, nil
 }
 
 func (p *Incus) DeleteInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) error {

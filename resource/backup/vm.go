@@ -87,15 +87,35 @@ func (h *Vm) Run(ctx context.Context, leased command.Leased, logger *slog.Logger
 
 func copyAndUpload(ctx context.Context, p provider.Provider, project string, instance string, copyName string,
 	upload api.BackupTarget) error {
+	snapshot, err := p.GetInstanceSnapshot(ctx, project, instance, snapshotName)
+	if err != nil {
+		return err
+	}
 	copyRequest := api.InstancesPost{
-		Name:   copyName,
-		Type:   api.InstanceTypeVM,
-		Source: api.InstanceSource{Type: "copy", Source: provider.SnapshotId(instance, snapshotName)},
+		InstancePut: api.InstancePut{Devices: volumesMasked(snapshot.Devices)},
+		Name:        copyName,
+		Type:        api.InstanceTypeVM,
+		Source:      api.InstanceSource{Type: "copy", Source: provider.SnapshotId(instance, snapshotName)},
 	}
 	if err := p.CreateInstance(ctx, project, copyRequest); err != nil {
 		return err
 	}
 	return p.BackupInstance(ctx, project, copyName, upload)
+}
+
+// volumesMasked names each custom volume the snapshot has attached, as a device of type none: a copy takes the
+// source's devices except those its request names, so the copy holds no volume (a volume has its own backup). The
+// archive then declares the volume as type none under its name; a restore attaches it again
+// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/backup/design.md#incus-backup).
+func volumesMasked(devices map[string]map[string]string) map[string]map[string]string {
+	masked := map[string]map[string]string{}
+	for name, settings := range devices {
+		isVolume := settings["type"] == "disk" && settings["source"] != ""
+		if isVolume {
+			masked[name] = map[string]string{"type": "none"}
+		}
+	}
+	return masked
 }
 
 // GiveUp removes what a run left; the command has no callback.
@@ -122,7 +142,7 @@ func removeVmLeftovers(ctx context.Context, p provider.Provider, project string,
 	if err := deleteInstanceIfThere(ctx, p, project, copyName); err != nil {
 		return err
 	}
-	err := p.GetInstanceSnapshot(ctx, project, instance, snapshotName)
+	_, err := p.GetInstanceSnapshot(ctx, project, instance, snapshotName)
 	if provider.IsNotFound(err) {
 		return nil
 	}

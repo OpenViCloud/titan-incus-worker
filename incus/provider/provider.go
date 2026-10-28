@@ -53,8 +53,8 @@ type Provider interface {
 	UpdateInstance(ctx context.Context, project string, name string, instance api.InstancePut) error
 	CreateInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) error
 	DeleteInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) error
-	// GetInstanceSnapshot answers nil when the snapshot is there, a 404 error when it is not.
-	GetInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) error
+	// GetInstanceSnapshot answers the snapshot, or a 404 error when it is not there.
+	GetInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) (*api.InstanceSnapshot, error)
 
 	// Custom volumes of a storage pool. CreateVolume makes an empty volume or, with a copy source, a volume from a
 	// snapshot (restore, lab-storage 03).
