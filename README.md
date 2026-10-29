@@ -68,9 +68,8 @@ scripts/sync-kinds.sh <control-plane commit, tag or branch>
 
 CI fails when the copy differs from the file at `contract/SOURCE`. Each push to `main` whose tests pass publishes
 the image `ghcr.io/openvicloud/titan-incus-worker:<commit sha>` (linux/arm64 and linux/amd64). The design rules of
-the worker live in titan-ops's
-[docs/architecture/worker-structure.md](https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/worker-structure.md)
-and [docs/architecture/provider-and-worker.md](https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md).
+the worker live in titan-ops (private): `titan-ops architecture/worker-structure.md` and
+`titan-ops architecture/provider-and-worker.md`.
 
 ## License
 

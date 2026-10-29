@@ -73,7 +73,7 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 
 // DecideReport compares one rule with its ACL: a report when its state or its existence differs from what Titan
 // recorded. The state goes as Incus spells it. Absent is NotFound, never Deleted: only a delete command reports that
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#existence-axis).
+// (titan-ops architecture/desired-and-current.md#existence-axis).
 func DecideReport(row ReconcilableRule, stateById map[string]string) (statusReport, bool) {
 	state, present := stateById[row.ExternalId]
 	if !present {

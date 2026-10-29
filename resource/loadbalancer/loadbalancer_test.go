@@ -100,7 +100,7 @@ func onlyReport(t *testing.T, cp *testsupport.ControlPlane) map[string]any {
 	return all[0]
 }
 
-// ---- the Incus shape (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/load-balancer/design.md#lb-resource-model)
+// ---- the Incus shape (titan-ops features/load-balancer/design.md#lb-resource-model)
 
 func TestEui64_IsTheAddressTheGuestOfThatMacUses(t *testing.T) {
 	got, err := Eui64(subnet, macA)

@@ -49,7 +49,7 @@ type observedVolume struct {
 
 // Reconcile observes one cluster's volumes and volume snapshots and reports what differs; it never acts on Incus, and it
 // never reports Deleted: a volume or snapshot gone is NotFound, only Titan's own delete command says Deleted
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#existence-axis). The all-projects volume list has no snapshots
+// (titan-ops architecture/desired-and-current.md#existence-axis). The all-projects volume list has no snapshots
 // (lab-storage 02), so the snapshots of each volume are one more read. A failed read skips what it would have said:
 // reading it as "nothing there" would report everything gone.
 func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, storagePool string, logger *slog.Logger) error {

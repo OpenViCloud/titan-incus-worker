@@ -8,15 +8,15 @@ import (
 )
 
 // Titan names every Incus object it creates from the Titan id: unique in the project, so a repeated create finds its
-// own object (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/intent-and-observation.md#provider-create-idempotency). The id is written in base32,
+// own object (titan-ops architecture/intent-and-observation.md#provider-create-idempotency). The id is written in base32,
 // not as a UUID: LVM refuses an LV name past 117 characters and Incus doubles every "-" in it (lab-storage 05c), which
-// leaves a "<prefix>-<uuid>" snapshot of a "vm-<uuid>" no room (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/vm/design.md#incus-names).
+// leaves a "<prefix>-<uuid>" snapshot of a "vm-<uuid>" no room (titan-ops features/vm/design.md#incus-names).
 const (
 	instancePrefix = "vm"
 	volumePrefix   = "vol"
 	snapshotPrefix = "s"
 	// A backup uploads a stopped copy of a snapshot, never the disk a running VM is writing
-	// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/backup/design.md#incus-backup).
+	// (titan-ops features/backup/design.md#incus-backup).
 	backupInstanceCopyPrefix = "bk"
 	backupVolumeCopyPrefix   = "bkv"
 )
@@ -61,7 +61,7 @@ func NetworkName(networkId string) string {
 }
 
 // NetworkAclName is the network ACL that holds a network's firewall rules, in the network's project
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/network/design.md#firewall-on-incus).
+// (titan-ops features/network/design.md#firewall-on-incus).
 func NetworkAclName(networkId string) string {
 	return "acl-" + networkId
 }

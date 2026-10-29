@@ -19,7 +19,7 @@ type deletePayload struct {
 
 // Delete runs volume.delete and reports Deleted. Incus refuses while the volume is attached (400, lab-storage 04): an
 // error the next lease may get past. Giving up reports the request failed, which gives the volume back
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#abandoned-request).
+// (titan-ops architecture/desired-and-current.md#abandoned-request).
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters

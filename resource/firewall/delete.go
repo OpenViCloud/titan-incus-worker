@@ -23,7 +23,7 @@ type deletePayload struct {
 }
 
 // Delete runs firewall-rule.delete: the rule's entry leaves its ACL. Giving up gives the rule back to the tenant
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#abandoned-request).
+// (titan-ops architecture/desired-and-current.md#abandoned-request).
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters

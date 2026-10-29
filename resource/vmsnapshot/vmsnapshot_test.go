@@ -115,7 +115,7 @@ func TestCreate_OtherOperationFailure_FailsTheRun(t *testing.T) {
 }
 
 // The tenant reads the fixed reason; the raw error goes to the operator's detail
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#request-failure).
+// (titan-ops architecture/desired-and-current.md#request-failure).
 func TestGiveUps_ReportRequestFailedWithAFixedReason_AndTheRawErrorAsDetail(t *testing.T) {
 	cases := []struct {
 		handler func(cp *testsupport.ControlPlane) command.Handler
@@ -150,7 +150,7 @@ func TestGiveUps_ReportRequestFailedWithAFixedReason_AndTheRawErrorAsDetail(t *t
 }
 
 // The create's give-up carries the id when Incus has the snapshot: then the create did happen, and a delete of it
-// reaches Incus (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/vm/design.md#vm-snapshot-reports).
+// reaches Incus (titan-ops features/vm/design.md#vm-snapshot-reports).
 func TestCreate_GiveUp_CarriesTheIdOnlyWhenTheSnapshotExists(t *testing.T) {
 	for _, exists := range []bool{true, false} {
 		cp := testsupport.NewControlPlane(t)
@@ -282,7 +282,7 @@ func TestDecideReport(t *testing.T) {
 }
 
 // The reconciler never reports Deleted, nor ends a revert: a snapshot gone is NotFound
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#existence-axis).
+// (titan-ops architecture/desired-and-current.md#existence-axis).
 func TestReconcile_ReportsOnTheSnapshotsVm_AGoneSnapshotAsNotFound(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	cp.Respond("GET", "/internal/reconcile/vm-snapshots?clusterId=mock", 200,

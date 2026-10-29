@@ -13,9 +13,9 @@ import (
 )
 
 // The reports UpdateVmSnapshotStatusCommandHandler accepts. Incus has no status word for an instance snapshot
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/vm/design.md#vm-snapshot-is-existence): an observation says whether it exists, the revert command
+// (titan-ops features/vm/design.md#vm-snapshot-is-existence): an observation says whether it exists, the revert command
 // says when the VM's disk is back at it, and a give-up is a request failure
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#request-failure).
+// (titan-ops architecture/desired-and-current.md#request-failure).
 const (
 	reportObserved      = "Observed"
 	reportCreated       = "Created"

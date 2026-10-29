@@ -67,7 +67,7 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 // DecideReport compares one network with Incus: a report when the status or the existence differs from what Titan
 // recorded. The status goes as Incus spells it, whatever the word. Absent is NotFound, never Deleted: only the delete
 // command reports that, since a reconciler pointed at the wrong cluster also finds nothing
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#existence-axis).
+// (titan-ops architecture/desired-and-current.md#existence-axis).
 func DecideReport(row ReconcilableNetwork, statusByName map[string]string) (statusReport, bool) {
 	status, present := statusByName[row.ExternalId]
 	if !present {

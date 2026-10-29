@@ -85,7 +85,7 @@ func (l *Loop) PollOnce(ctx context.Context) (bool, error) {
 	}
 	l.unansweredLeaseId = leaseId
 	leasePath := "/internal/provider-commands/leases/" + leaseId
-	// PUT is idempotent per lease id (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md#provider-command-lease).
+	// PUT is idempotent per lease id (titan-ops architecture/provider-and-worker.md#provider-command-lease).
 	if err := l.cp.Put(ctx, leasePath, map[string][]string{"kinds": l.kinds()}); err != nil {
 		return false, fmt.Errorf("lease provider command: %w", err)
 	}
@@ -164,7 +164,7 @@ func (l *Loop) execute(ctx context.Context, leaseId string, leased Leased) {
 	l.reportFailure(ctx, logger, leaseId, runErr, true)
 }
 
-// giveUpAndFail sends the give-up callback before the failure (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md#retry-on-workflow).
+// giveUpAndFail sends the give-up callback before the failure (titan-ops architecture/provider-and-worker.md#retry-on-workflow).
 // A give-up callback that may pass later is not followed by the failure: the lease runs out, and the next lease arrives
 // past its last attempt and sends the callback again. Failing now would leave the resource waiting for ever.
 func (l *Loop) giveUpAndFail(ctx context.Context, workCtx context.Context, logger *slog.Logger, leaseId string,

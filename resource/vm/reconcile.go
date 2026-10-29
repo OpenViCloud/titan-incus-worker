@@ -76,7 +76,7 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 
 // DecideReport compares one VM with Incus: a report when the status, the existence or an address differs from what
 // Titan recorded. Absent is NotFound, never Deleted: only the delete command reports that, since a reconciler pointed
-// at the wrong cluster also finds nothing (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#reconciler-never-dies).
+// at the wrong cluster also finds nothing (titan-ops architecture/desired-and-current.md#reconciler-never-dies).
 func DecideReport(row ReconcilableVm, byName map[string]api.InstanceFull) (statusReport, bool) {
 	instance, present := byName[row.ExternalId]
 	if !present {
@@ -129,7 +129,7 @@ func firstGlobalIpv4(state *api.InstanceState) string {
 }
 
 // publicIpv6 is the VM's public IPv6: a global inet6 address, which only a network with public IPv6 gives
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/infra/incus/design.md#ipv6-ovn-uplink). Unique local addresses (fc00::/7) carry scope global too and are
+// (titan-ops infra/incus/design.md#ipv6-ovn-uplink). Unique local addresses (fc00::/7) carry scope global too and are
 // left out. A guest may hold several: the one SLAAC built from the NIC's MAC (EUI-64) stays while privacy addresses
 // rotate, so it is taken when present; otherwise the smallest, so every cycle picks the same one while the set holds.
 func publicIpv6(state *api.InstanceState) string {

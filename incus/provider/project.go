@@ -17,7 +17,7 @@ var projectConfig = map[string]string{
 	"features.storage.volumes": "true",
 }
 
-// EnsureProject creates the tenant's project on first use (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/tenancy-and-admin.md#project-name). A 409
+// EnsureProject creates the tenant's project on first use (titan-ops architecture/tenancy-and-admin.md#project-name). A 409
 // is another run that got there first.
 func EnsureProject(ctx context.Context, p Provider, name string) error {
 	_, err := p.GetProject(ctx, name)

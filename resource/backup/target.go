@@ -1,5 +1,5 @@
 // Package backup sends a tenant VM's root disk and a custom volume to the environment's backup bucket
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/backup/design.md#incus-backup). Incus uploads the
+// (titan-ops features/backup/design.md#incus-backup). Incus uploads the
 // archive itself; the worker only asks for it, so no byte of it passes through the worker.
 package backup
 

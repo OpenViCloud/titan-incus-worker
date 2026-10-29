@@ -85,7 +85,7 @@ func (h *Sync) Run(ctx context.Context, leased command.Leased, logger *slog.Logg
 }
 
 // ensureClusterArchitecture: when the image server has no VM image of the cluster's architecture, Incus pulls
-// another one without an error, and no VM can start from it (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/catalog/design.md#template-architecture).
+// another one without an error, and no VM can start from it (titan-ops features/catalog/design.md#template-architecture).
 // The image is deleted so the reconciler sees the alias absent instead of reporting it present.
 func ensureClusterArchitecture(ctx context.Context, p provider.Provider, alias string, osImageName string) error {
 	entry, err := p.GetImageAlias(ctx, alias)

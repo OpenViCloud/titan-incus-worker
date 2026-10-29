@@ -34,7 +34,7 @@ const checksumFileName = "SHA256SUMS"
 var distroArchitectures = map[string]string{"x86_64": "amd64", "aarch64": "arm64"}
 
 // importImage downloads the distro's own image for the cluster's architecture, checks it against the checksum the
-// distro publishes, and uploads it under the alias (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/catalog/design.md#template-is-an-image-alias).
+// distro publishes, and uploads it under the alias (titan-ops features/catalog/design.md#template-is-an-image-alias).
 // The image goes to a temporary file, never into memory: it is hundreds of MB and the worker has 256 MiB.
 func (h *Sync) importImage(ctx context.Context, p provider.Provider, payload syncPayload, alias string) error {
 	// The URL is the only architecture guard on this path: the metadata carries the cluster's own architecture,

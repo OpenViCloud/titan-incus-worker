@@ -22,7 +22,7 @@ type deletePayload struct {
 }
 
 // Delete runs vm.delete and reports Deleted once Incus no longer has the instance
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#forget-on-provider-confirm). It has no give-up callback: the VM keeps its
+// (titan-ops architecture/desired-and-current.md#forget-on-provider-confirm). It has no give-up callback: the VM keeps its
 // delete waiting, and a repeated delete reruns the failed command.
 type Delete struct {
 	cp       *controlplane.Client

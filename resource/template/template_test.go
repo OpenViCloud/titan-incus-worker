@@ -189,7 +189,7 @@ func TestSync_GiveUp_ReportsRequestFailedWithItsCluster_AFixedReason_AndTheRawEr
 }
 
 // The reason tells the operator which of the causes they can act on it was: a cluster of another architecture, or a
-// cluster that is not configured (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/catalog/design.md#template-reports).
+// cluster that is not configured (titan-ops features/catalog/design.md#template-reports).
 func TestSync_GiveUp_NamesTheCauseInTheReason(t *testing.T) {
 	cases := []struct {
 		name  string

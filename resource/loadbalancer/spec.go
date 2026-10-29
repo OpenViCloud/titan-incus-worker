@@ -49,7 +49,7 @@ func (p specPayload) check() error {
 	return nil
 }
 
-// Eui64 is the SLAAC address a NIC with that MAC takes on the /64 (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/load-balancer/design.md#backend-address):
+// Eui64 is the SLAAC address a NIC with that MAC takes on the /64 (titan-ops features/load-balancer/design.md#backend-address):
 // the guest of the Titan Ubuntu template uses it (measured), and Incus knows the MAC before the guest boots.
 func Eui64(subnet string, mac string) (string, error) {
 	prefix, err := netip.ParsePrefix(subnet)
@@ -73,8 +73,8 @@ func Eui64(subnet string, mac string) (string, error) {
 }
 
 // incusSpec builds the Incus configuration: one backend per (listener i, VM), named l<i>-<instance>, so each port
-// sends to its own target port (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/load-balancer/design.md#lb-resource-model); the health check is on
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/load-balancer/design.md#health-check). An instance Incus no longer has can never be a backend.
+// sends to its own target port (titan-ops features/load-balancer/design.md#lb-resource-model); the health check is on
+// (titan-ops features/load-balancer/design.md#health-check). An instance Incus no longer has can never be a backend.
 func incusSpec(ctx context.Context, p provider.Provider, payload specPayload) (api.NetworkLoadBalancerPut, error) {
 	addresses := map[string]string{}
 	for _, b := range payload.Backends {

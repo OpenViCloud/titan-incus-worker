@@ -9,9 +9,9 @@ import (
 )
 
 // The reports UpdateVolumeStatusCommandHandler and UpdateVolumeSnapshotStatusCommandHandler accept. Incus has no status
-// word for a custom volume or its snapshots (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/volume/design.md#volume-state-is-existence): an observation
+// word for a custom volume or its snapshots (titan-ops features/volume/design.md#volume-state-is-existence): an observation
 // says whether it exists and, for a volume, which instances use it; a give-up is a request failure
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#request-failure).
+// (titan-ops architecture/desired-and-current.md#request-failure).
 const (
 	ReportObserved      = "Observed"
 	ReportCreated       = "Created"
@@ -20,7 +20,7 @@ const (
 )
 
 // Reason is returned verbatim to the tenant, so it carries only these fixed texts; the raw error goes to the
-// admin-only detail (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/public-api/design.md#status-reason).
+// admin-only detail (titan-ops features/public-api/design.md#status-reason).
 const (
 	ReasonCreateFailed = "Volume creation failed due to a system error. Please try again or contact support."
 	reasonAttachFailed = "Attaching the volume failed due to a system error. Please try again or contact support."
@@ -31,7 +31,7 @@ const (
 // StatusReport is the body of PATCH /internal/volumes/{volumeId}/status and of its snapshots' callback. Exists is a
 // pointer so an observation always says true or false, and the other reports leave it out. AttachedTo is the names of
 // the instances in the volume's used_by, as Incus lists them: which are Titan VMs is the control plane's to say
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/volume/design.md#attachment-from-used-by).
+// (titan-ops features/volume/design.md#attachment-from-used-by).
 type StatusReport struct {
 	Report     string   `json:"report"`
 	Exists     *bool    `json:"exists,omitempty"`
