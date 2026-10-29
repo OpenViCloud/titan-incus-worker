@@ -33,7 +33,7 @@ func Permanent(err error) error {
 }
 
 // IsRetryable: every error is worth another lease unless some error in its chain says it is permanent
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md#retry-on-workflow). Provider errors count as transient: an Incus
+// (titan-ops architecture/provider-and-worker.md#retry-on-workflow). Provider errors count as transient: an Incus
 // operation that failed may pass next time.
 func IsRetryable(err error) bool {
 	var answer permanent

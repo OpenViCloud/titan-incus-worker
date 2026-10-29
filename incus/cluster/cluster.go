@@ -1,5 +1,5 @@
 // Package cluster connects to an Incus cluster by its id, reading the connection from the control plane
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/cluster/design.md#worker-cluster-connection), caching the connection for a few minutes.
+// (titan-ops features/cluster/design.md#worker-cluster-connection), caching the connection for a few minutes.
 package cluster
 
 import (

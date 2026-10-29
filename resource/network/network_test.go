@@ -109,7 +109,7 @@ func createLeasedWithPolicies(ingress string, egress string) command.Leased {
 }
 
 // A network without public IPv6 has no uplink, even where the cluster has one: OVN keeps each one to itself and lets two
-// tenants use the same CIDR (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/vm-network.md#no-ipv4-egress).
+// tenants use the same CIDR (titan-ops architecture/vm-network.md#no-ipv4-egress).
 func TestCreate_MakesAnIsolatedOvnNetwork_WithItsAcl_AndReportsCreated(t *testing.T) {
 	for _, uplink := range []string{"ovnup", ""} {
 		cp := testsupport.NewControlPlane(t)
@@ -150,7 +150,7 @@ func TestCreate_MakesAnIsolatedOvnNetwork_WithItsAcl_AndReportsCreated(t *testin
 }
 
 // A network with public IPv6 goes on the cluster's uplink and carries its /64; its router takes the address the static
-// OVH route of that /64 points to (https://github.com/OpenViCloud/titan-ops/blob/main/docs/infra/incus/design.md#ipv6-ovn-uplink). IPv4 stays as on any other network.
+// OVH route of that /64 points to (titan-ops infra/incus/design.md#ipv6-ovn-uplink). IPv4 stays as on any other network.
 func TestCreate_WithPublicIpv6_UsesTheClustersUplink_AndPinsTheRouter(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -349,7 +349,7 @@ func TestCreate_WithPublicIpv6_AlreadyOurs_IsCheckedToo(t *testing.T) {
 }
 
 // On an isolated network every packet is one VM's egress and another's ingress, and Incus applies only the egress
-// default between them (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/network/design.md#firewall-default-policy): either Deny blocks, both Allow lets
+// default between them (titan-ops features/network/design.md#firewall-default-policy): either Deny blocks, both Allow lets
 // through.
 func TestCreate_MergesTheTwoPolicies(t *testing.T) {
 	cases := []struct {
@@ -645,7 +645,7 @@ func TestDelete_GiveUp_ReportsRequestFailed(t *testing.T) {
 
 func strp(value string) *string { return &value }
 
-// https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#provider-state-is-verbatim: whatever word Incus has, it goes as it is.
+// titan-ops architecture/desired-and-current.md#provider-state-is-verbatim: whatever word Incus has, it goes as it is.
 func TestDecideReport(t *testing.T) {
 	observed := map[string]string{"net-a": "Created", "net-b": "Pending", "net-c": "Errored", "net-u": "Unknown", "net-v": "Unavailable"}
 	cases := []struct {

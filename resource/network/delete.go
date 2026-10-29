@@ -18,7 +18,7 @@ type deletePayload struct {
 }
 
 // Delete runs network.delete. Giving up gives the network back to the tenant
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#abandoned-request).
+// (titan-ops architecture/desired-and-current.md#abandoned-request).
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters

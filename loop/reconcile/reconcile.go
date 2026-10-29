@@ -1,5 +1,5 @@
 // Package reconcile is the reconciler loop: every interval, each kind in each cluster the control plane configures
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md#reconciler-is-a-worker-ticker). An error skips that cluster and kind for the
+// (titan-ops architecture/provider-and-worker.md#reconciler-is-a-worker-ticker). An error skips that cluster and kind for the
 // cycle; the loop never exits on one.
 package reconcile
 

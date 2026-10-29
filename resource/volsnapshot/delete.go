@@ -21,7 +21,7 @@ type deletePayload struct {
 }
 
 // Delete runs volume-snapshot.delete and reports Deleted; giving up reports the request failed, which gives the snapshot
-// back (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#abandoned-request).
+// back (titan-ops architecture/desired-and-current.md#abandoned-request).
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters

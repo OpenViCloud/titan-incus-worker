@@ -51,7 +51,7 @@ func TestLoadConfig_BadDuration_Fails(t *testing.T) {
 
 // The control plane's kinds, read from its C# source as copied by scripts/sync-kinds.sh rather than retyped: a kind
 // added there and not routed here would stay Pending forever
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md#provider-command-table).
+// (titan-ops architecture/provider-and-worker.md#provider-command-table).
 const providerCommandKindsSource = "contract/ProviderCommandKinds.cs"
 
 var kindConstant = regexp.MustCompile(`public const string \w+ = "([^"]+)";`)
@@ -74,7 +74,7 @@ func controlPlaneKinds(t *testing.T) []string {
 
 // A route with no kind yet is allowed: the worker ships a new kind before the control plane enqueues it, and keeps a
 // removed one until the control plane has stopped
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md#contract-changes).
+// (titan-ops architecture/provider-and-worker.md#contract-changes).
 func TestRoutes_CoverTheControlPlanesKinds(t *testing.T) {
 	routes := routes(nil, nil, "", backup.Target{})
 	kinds := controlPlaneKinds(t)

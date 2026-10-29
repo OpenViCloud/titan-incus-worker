@@ -55,7 +55,7 @@ func SubnetOf(routerAddress string) (Subnet, bool) {
 }
 
 // PublicIpv6 is what the control plane gives a network with public IPv6: its /64, and its router's address on the
-// uplink, which the static OVH route of that /64 points to (https://github.com/OpenViCloud/titan-ops/blob/main/docs/infra/incus/design.md#ipv6-ovn-uplink). The zero
+// uplink, which the static OVH route of that /64 points to (titan-ops infra/incus/design.md#ipv6-ovn-uplink). The zero
 // value is a network without public IPv6.
 type PublicIpv6 struct {
 	Subnet        netip.Prefix // 2001:41d0:d00:d470::/64

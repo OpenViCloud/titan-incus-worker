@@ -460,7 +460,7 @@ func TestReconcile_SendsTheIncusStateAsIs_AndGoneAsNotFound(t *testing.T) {
 	}
 }
 
-// The reconciler never reports Deleted (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#existence-axis): even a rule whose
+// The reconciler never reports Deleted (titan-ops architecture/desired-and-current.md#existence-axis): even a rule whose
 // delete waits is only not found; the delete command confirms it.
 func TestReconcile_RuleGone_NeverReportsDeleted(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)

@@ -54,7 +54,7 @@ func TestDecideReport_Running_CarriesTheFirstGlobalIpv4_SkippingLoopback(t *test
 	}
 }
 
-// Incus says Running before DHCP answers; that is Running (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#provider-state-is-verbatim).
+// Incus says Running before DHCP answers; that is Running (titan-ops architecture/desired-and-current.md#provider-state-is-verbatim).
 // The address follows in a later cycle as an address change.
 func TestDecideReport_RunningWithoutAnIpv4Yet_IsReportedRunning(t *testing.T) {
 	row := ReconcilableVm{Id: "a", ExternalId: "vm-a", CurrentExistence: "Exists"}

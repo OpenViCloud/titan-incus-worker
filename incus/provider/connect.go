@@ -23,7 +23,7 @@ type Credentials struct {
 
 // Connect opens a client to the cluster, accepting the server by its pinned SHA-256 fingerprint alone — chain and host
 // name are not checked, because an Incus server presents a self-signed certificate
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/cluster/design.md#cluster-incus).
+// (titan-ops features/cluster/design.md#cluster-incus).
 func Connect(credentials Credentials) (incus.InstanceServer, error) {
 	server, err := incus.ConnectIncus(credentials.Endpoint, ConnectionArgs(credentials))
 	if err != nil {

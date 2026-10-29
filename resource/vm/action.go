@@ -28,7 +28,7 @@ type actionPayload struct {
 }
 
 // Action runs vm.stop or vm.start. Success reports nothing: the reconciler observes Stopped/Running. Giving up
-// withdraws the intent (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/vm/design.md#intent-failed-callback).
+// withdraws the intent (titan-ops features/vm/design.md#intent-failed-callback).
 type Action struct {
 	cp          *controlplane.Client
 	clusters    cluster.Clusters
@@ -36,7 +36,7 @@ type Action struct {
 	alreadyDone string
 	// Incus counts a Frozen instance as running: action "start" answers "already running" and leaves it Frozen,
 	// so a start reads the instance first and resumes a Frozen one with "unfreeze"
-	// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/vm/design.md#requests-follow-incus).
+	// (titan-ops features/vm/design.md#requests-follow-incus).
 	unfreezesFrozen bool
 }
 

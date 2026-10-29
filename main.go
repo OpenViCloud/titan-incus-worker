@@ -1,6 +1,6 @@
 // Command incus-worker is Titan's only actor on Incus: it leases provider commands from the control plane, runs them
 // against the cluster, reports back, and runs the reconcilers
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md#go-worker).
+// (titan-ops architecture/provider-and-worker.md#go-worker).
 package main
 
 import (

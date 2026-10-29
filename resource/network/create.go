@@ -32,7 +32,7 @@ const (
 
 // DefaultAction merges the network's two policies into the one action Incus applies between VMs of an isolated
 // network: there every packet is one VM's egress and another's ingress, and only the egress default takes effect
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/network/design.md#firewall-default-policy). Either Deny blocks; a missing policy (a command enqueued
+// (titan-ops features/network/design.md#firewall-default-policy). Either Deny blocks; a missing policy (a command enqueued
 // before the ingress one was sent) is Allow.
 func DefaultAction(ingressPolicy string, egressPolicy string) (string, error) {
 	denies := false
@@ -281,7 +281,7 @@ func ensureAclSettings(ctx context.Context, p provider.Provider, project string,
 
 // checkPublicIpv6 reads a network with public IPv6 back and compares it with what was asked. A router at another
 // address gets nothing from the static OVH route of the /64 while the network looks healthy, so a difference is
-// permanent (https://github.com/OpenViCloud/titan-ops/blob/main/docs/infra/incus/design.md#ipv6-ovn-uplink). Addresses are compared parsed: Incus may write them another
+// permanent (titan-ops infra/incus/design.md#ipv6-ovn-uplink). Addresses are compared parsed: Incus may write them another
 // way.
 func checkPublicIpv6(ctx context.Context, p provider.Provider, project string, name string, uplink string, publicIpv6 PublicIpv6) error {
 	if !publicIpv6.IsOn() {
@@ -320,9 +320,9 @@ func publicIpv6Mismatch(name string, config map[string]string, uplink string, pu
 }
 
 // NetworkRequest: tenant IPv4 reaches only the VMs of its own network — no router out, no NAT, and two tenants may use
-// the same CIDR (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/vm-network.md#no-ipv4-egress). Without public IPv6 the network has no uplink at all;
+// the same CIDR (titan-ops architecture/vm-network.md#no-ipv4-egress). Without public IPv6 the network has no uplink at all;
 // with it, the network goes on the cluster's uplink with its /64, no NAT, and its router at the address the OVH route of
-// that /64 points to (https://github.com/OpenViCloud/titan-ops/blob/main/docs/infra/incus/design.md#ipv6-ovn-uplink). The network carries its ACL, with defaultAction for
+// that /64 points to (titan-ops infra/incus/design.md#ipv6-ovn-uplink). The network carries its ACL, with defaultAction for
 // traffic no rule allows.
 func NetworkRequest(payload createPayload, ipv4Address string, defaultAction string, uplink string, publicIpv6 PublicIpv6) (api.NetworksPost, error) {
 	config := map[string]string{

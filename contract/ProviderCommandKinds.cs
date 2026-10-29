@@ -1,6 +1,6 @@
 namespace Titan.Domain.Aggregates.Platform.ProviderCommand;
 
-/// The worker routes on these; a kind no worker claims stays Pending (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md#provider-command-table).
+/// The worker routes on these; a kind no worker claims stays Pending (titan-ops architecture/provider-and-worker.md#provider-command-table).
 public static class ProviderCommandKinds
 {
     public const string VmCreate = "vm.create";

@@ -27,7 +27,7 @@ const (
 )
 
 // Reconcile observes one cluster's VM snapshots and reports what differs; it never acts on Incus, and it never reports
-// Deleted: a snapshot gone is NotFound (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#existence-axis). The all-projects
+// Deleted: a snapshot gone is NotFound (titan-ops architecture/desired-and-current.md#existence-axis). The all-projects
 // instance list (recursion=2) carries each instance's snapshots (lab-storage 05), so one read covers them all.
 func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error {
 	var rows []ReconcilableVmSnapshot

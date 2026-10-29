@@ -47,7 +47,7 @@ func (h *Update) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 }
 
 // GiveUp names the intent, so a give-up that a delete has since replaced is read as stale
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/load-balancer/design.md#lb-lifecycle).
+// (titan-ops features/load-balancer/design.md#lb-lifecycle).
 func (h *Update) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
 	var payload specPayload
 	if err := command.DecodePayload(leased, &payload); err != nil {

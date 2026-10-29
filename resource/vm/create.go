@@ -38,7 +38,7 @@ type createPayload struct {
 }
 
 // Create runs vm.create. It reports only the provider id (Created) or the give-up; the cluster's reconciler reports
-// Running (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#desired-and-current).
+// Running (titan-ops architecture/desired-and-current.md#desired-and-current).
 type Create struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -149,7 +149,7 @@ func InstanceRequest(payload createPayload, storagePool string) (api.InstancesPo
 		config[userDataKey] = payload.UserData
 	}
 	// Titan's own script, built by the control plane; empty when no key was picked
-	// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/vm/design.md#ssh-key).
+	// (titan-ops features/vm/design.md#ssh-key).
 	if payload.VendorData != "" {
 		config[vendorDataKey] = payload.VendorData
 	}

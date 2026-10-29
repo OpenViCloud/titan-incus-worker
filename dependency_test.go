@@ -11,7 +11,7 @@ import (
 
 const modulePath = "github.com/OpenViCloud/titan-incus-worker"
 
-// Each package belongs to one role, named by its first directory (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/worker-structure.md#worker-layout).
+// Each package belongs to one role, named by its first directory (titan-ops architecture/worker-structure.md#worker-layout).
 // main wires everything · loop runs the work and knows no resource · resource holds one resource each · incus,
 // controlplane and bucket talk to the outside and know neither loop nor resource.
 var allowedGroupEdges = map[string][]string{

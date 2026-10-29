@@ -106,7 +106,7 @@ func copyAndUpload(ctx context.Context, p provider.Provider, project string, ins
 // volumesMasked names each custom volume the snapshot has attached, as a device of type none: a copy takes the
 // source's devices except those its request names, so the copy holds no volume (a volume has its own backup). The
 // archive then declares the volume as type none under its name; a restore attaches it again
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/backup/design.md#incus-backup).
+// (titan-ops features/backup/design.md#incus-backup).
 func volumesMasked(devices map[string]map[string]string) map[string]map[string]string {
 	masked := map[string]map[string]string{}
 	for name, settings := range devices {

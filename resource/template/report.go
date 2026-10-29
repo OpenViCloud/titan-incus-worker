@@ -1,5 +1,5 @@
 // Package template runs template.sync — a template on Incus is an image alias in the default project
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/catalog/design.md#template-is-an-image-alias) — and the cluster's template reconciler.
+// (titan-ops features/catalog/design.md#template-is-an-image-alias) — and the cluster's template reconciler.
 package template
 
 import (
@@ -10,7 +10,7 @@ import (
 )
 
 // The reports UpdateTemplateStatusCommandHandler accepts. Incus has no status word for an image alias
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/catalog/design.md#template-state-is-existence): an observation says whether the alias exists; a
+// (titan-ops features/catalog/design.md#template-state-is-existence): an observation says whether the alias exists; a
 // give-up is a request failure. A template is never deleted, so there is no Deleted report.
 const (
 	reportObserved      = "Observed"

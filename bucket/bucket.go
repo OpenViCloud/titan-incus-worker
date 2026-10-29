@@ -1,5 +1,5 @@
 // Package bucket reads the backup bucket: whether an object is there. Incus writes the backups; the worker only checks
-// that they arrived (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/backup/design.md#incus-backup).
+// that they arrived (titan-ops features/backup/design.md#incus-backup).
 package bucket
 
 import (

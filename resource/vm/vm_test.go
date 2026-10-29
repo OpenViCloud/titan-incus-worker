@@ -118,7 +118,7 @@ func TestCreate_CloudConfigWithContent_IsSent(t *testing.T) {
 }
 
 // Titan's own script (keys picked at create) travels apart from the customer's user-data, so both run
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/vm/design.md#ssh-key). A script starts with "#!", which HasUserDataContent reads as a comment.
+// (titan-ops features/vm/design.md#ssh-key). A script starts with "#!", which HasUserDataContent reads as a comment.
 func TestCreate_VendorData_IsSentAsCloudInitVendorData(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -287,7 +287,7 @@ func TestStart_AlreadyRunning_IsSuccess(t *testing.T) {
 }
 
 // Incus answers action "start" on a Frozen instance with "already running" and leaves it Frozen; "unfreeze" is
-// what resumes it (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/vm/design.md#requests-follow-incus).
+// what resumes it (titan-ops features/vm/design.md#requests-follow-incus).
 func TestStart_FrozenInstance_IsUnfrozen(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -402,7 +402,7 @@ func TestDelete_RunningInstance_IsStoppedThenDeleted(t *testing.T) {
 	}
 }
 
-// Incus deletes a frozen instance after a forced stop (https://github.com/OpenViCloud/titan-ops/blob/main/docs/features/vm/design.md#requests-follow-incus): only Stopped skips the stop.
+// Incus deletes a frozen instance after a forced stop (titan-ops features/vm/design.md#requests-follow-incus): only Stopped skips the stop.
 func TestDelete_FrozenInstance_IsStoppedThenDeleted(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -455,7 +455,7 @@ func TestDelete_DeleteRefused_IsRetryable_AndReportsNothing(t *testing.T) {
 	}
 }
 
-// A VM keeps its delete waiting when the command gives up (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#abandoned-request):
+// A VM keeps its delete waiting when the command gives up (titan-ops architecture/desired-and-current.md#abandoned-request):
 // the give-up tells the control plane nothing.
 func TestDelete_GiveUp_SendsNothing(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)

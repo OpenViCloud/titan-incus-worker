@@ -1,5 +1,5 @@
 // Package command leases provider commands from the control plane, runs them one at a time, and reports the outcome
-// (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/provider-and-worker.md#provider-command-lease).
+// (titan-ops architecture/provider-and-worker.md#provider-command-lease).
 package command
 
 import (

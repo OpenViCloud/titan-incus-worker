@@ -19,7 +19,7 @@ type deletePayload struct {
 }
 
 // Delete runs load-balancer.delete: the VIP leaves its network; one already gone is done. Only this command reports
-// Deleted (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#forget-on-provider-confirm).
+// Deleted (titan-ops architecture/desired-and-current.md#forget-on-provider-confirm).
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -53,7 +53,7 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	return sendStatus(ctx, h.cp, payload.LoadBalancerId, statusReport{Report: reportDeleted})
 }
 
-// GiveUp gives the load balancer back to the tenant (https://github.com/OpenViCloud/titan-ops/blob/main/docs/architecture/desired-and-current.md#abandoned-request).
+// GiveUp gives the load balancer back to the tenant (titan-ops architecture/desired-and-current.md#abandoned-request).
 func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
 	var payload deletePayload
 	if err := command.DecodePayload(leased, &payload); err != nil {
