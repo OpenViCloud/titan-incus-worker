@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -332,6 +333,20 @@ func TestStart_InstanceGone_IsPermanent(t *testing.T) {
 	}
 }
 
+// The start may have happened: an outcome Incus forgot is worth another lease, not a give-up.
+func TestStart_OperationForgotten_IsRetryable(t *testing.T) {
+	cp := testsupport.NewControlPlane(t)
+	p := testsupport.NewProvider()
+	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName, StatusCode: api.Stopped}
+	p.UpdateStateErr = fmt.Errorf("start instance %s in project %s: %w", instanceName, project, forgottenWait())
+
+	err := NewStart(cp.Client(), clusters(p)).Run(context.Background(), actionLeased("vm.start"), testsupport.DiscardLogger())
+
+	if err == nil || !command.IsRetryable(err) {
+		t.Fatalf("want retryable, got %v", err)
+	}
+}
+
 func TestStop_InjectedFailure_IsRetryable(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -438,6 +453,44 @@ func TestDelete_DeleteAnswers404_ReportsDeleted(t *testing.T) {
 	}
 }
 
+// Incus forgetting an operation leaves its outcome unknown: the delete is retried and reports nothing, and the next
+// lease reads the instance again (titan-ops features/vm/design.md#vm-delete-observes-done).
+func TestDelete_StopsOperationForgotten_IsRetryable_AndReportsNothing(t *testing.T) {
+	logger, logs := testsupport.NewLogCapture(t)
+	cp := testsupport.NewControlPlane(t)
+	p := testsupport.NewProvider()
+	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName, StatusCode: api.Running}
+	p.UpdateStateErr = fmt.Errorf("stop instance %s in project %s: %w", instanceName, project, forgottenWait())
+
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), deleteLeased(), logger)
+
+	if err == nil || !command.IsRetryable(err) {
+		t.Fatalf("want retryable, got %v", err)
+	}
+	if len(cp.Requests()) != 0 {
+		t.Fatalf("reported while the instance may still be there: %+v", cp.Requests())
+	}
+	if got := logs.Objects("already gone; nothing to delete"); len(got) != 0 {
+		t.Fatalf("took a forgotten operation for a gone instance: %v", got)
+	}
+}
+
+func TestDelete_DeletesOperationForgotten_IsRetryable_AndReportsNothing(t *testing.T) {
+	cp := testsupport.NewControlPlane(t)
+	p := testsupport.NewProvider()
+	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName, StatusCode: api.Stopped}
+	p.DeleteInstanceErr = fmt.Errorf("delete instance %s in project %s: %w", instanceName, project, forgottenWait())
+
+	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), deleteLeased(), testsupport.DiscardLogger())
+
+	if err == nil || !command.IsRetryable(err) {
+		t.Fatalf("want retryable, got %v", err)
+	}
+	if len(cp.Requests()) != 0 {
+		t.Fatalf("reported while the instance may still be there: %+v", cp.Requests())
+	}
+}
+
 // Incus refusing the delete is worth another lease: the command is retried, and nothing is reported meanwhile.
 func TestDelete_DeleteRefused_IsRetryable_AndReportsNothing(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
@@ -509,4 +562,15 @@ func TestCreate_WithoutANetwork_IsPermanent_AndCreatesNothing(t *testing.T) {
 	if len(p.Instances) != 0 {
 		t.Fatal("created an instance without a network")
 	}
+}
+
+// forgottenWait is what WaitOperation returns when Incus already forgot the operation it waits for.
+func forgottenWait() error {
+	return provider.WaitOperation(context.Background(), forgetfulWaiter{}, "op")
+}
+
+type forgetfulWaiter struct{}
+
+func (forgetfulWaiter) GetOperationWait(string, int) (*api.Operation, string, error) {
+	return nil, "", testsupport.NotFound("Operation not found")
 }

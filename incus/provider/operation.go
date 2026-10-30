@@ -15,14 +15,28 @@ type OperationWaiter interface {
 	GetOperationWait(uuid string, timeout int) (*api.Operation, string, error)
 }
 
-// WaitOperation polls /operations/{id}/wait until the operation is final. A 404 means Incus forgot the operation (it
-// keeps finished ones for seconds, lab 09): the outcome is unknown, which is an error, not a success.
+// OperationForgottenError: Incus drops a finished operation 5 s after it ends, then answers a wait for it with 404
+// (testdata lab-compute-09). That 404 is not the object's, and the outcome is unknown, so this error does not unwrap
+// to it and is retried (titan-ops infra/incus/design.md#operation-forgotten).
+type OperationForgottenError struct {
+	OperationId string
+	Answer      string
+}
+
+func (e *OperationForgottenError) Error() string {
+	return "waiting for incus operation " + e.OperationId + ": " + e.Answer + " (outcome unknown)"
+}
+
+// WaitOperation polls /operations/{id}/wait until the operation is final.
 func WaitOperation(ctx context.Context, waiter OperationWaiter, operationId string) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("waiting for incus operation %s: %w", operationId, err)
 		}
 		operation, _, err := waiter.GetOperationWait(operationId, waitSeconds)
+		if IsNotFound(err) {
+			return &OperationForgottenError{OperationId: operationId, Answer: err.Error()}
+		}
 		if err != nil {
 			return fmt.Errorf("waiting for incus operation %s: %w", operationId, err)
 		}

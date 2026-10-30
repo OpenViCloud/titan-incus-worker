@@ -66,13 +66,19 @@ func TestWaitOperation_Failure_CarriesTheOperationError(t *testing.T) {
 	}
 }
 
-func TestWaitOperation_ForgottenOperation_IsAnError(t *testing.T) {
+// Incus drops a finished operation 5 seconds after it ends, then answers a wait for it with the 404 of an operation it
+// does not know (testdata lab-compute-09): that 404 says nothing about the object the operation acted on
+// (titan-ops infra/incus/design.md#operation-forgotten).
+func TestWaitOperation_ForgottenOperation_IsNotTheObjectGone(t *testing.T) {
 	waiter := &scriptedWaiter{err: api.StatusErrorf(http.StatusNotFound, "Operation not found")}
 
 	err := WaitOperation(context.Background(), waiter, "op")
 
-	if err == nil || !IsNotFound(err) {
-		t.Fatalf("want the 404, got %v", err)
+	if err == nil || IsNotFound(err) {
+		t.Fatalf("want an error that is not a 404, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "Operation not found") {
+		t.Fatalf("lost Incus's answer: %v", err)
 	}
 }
 
