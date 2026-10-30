@@ -1,4 +1,4 @@
-namespace Titan.Domain.Aggregates.Platform.ProviderCommand;
+namespace Titan.Domain.Aggregates.ProviderCommand;
 
 /// The worker routes on these; a kind no worker claims stays Pending (titan-ops architecture/provider-and-worker.md#provider-command-table).
 public static class ProviderCommandKinds
