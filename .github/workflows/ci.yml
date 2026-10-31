@@ -34,7 +34,7 @@ jobs:
       - name: Kinds copy matches contract/SOURCE
         run: |
           sha=$(cat contract/SOURCE)
-          curl -fsSL "https://raw.githubusercontent.com/OpenViCloud/titan-control-plane/$sha/Titan.Domain/Aggregates/ProviderCommand/ProviderCommandKinds.cs" \
+          curl -fsSL "https://raw.githubusercontent.com/OpenViCloud/titan-control-plane/$sha/Titan.Domain/Aggregates/ProviderCommand/Enums/ProviderCommandKinds.cs" \
             | diff - contract/ProviderCommandKinds.cs
 
       - name: Format

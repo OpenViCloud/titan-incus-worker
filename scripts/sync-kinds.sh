@@ -6,7 +6,7 @@
 set -euo pipefail
 ref=${1:?usage: scripts/sync-kinds.sh <control-plane commit, tag or branch>}
 cd "$(dirname "$0")/.."
-path=Titan.Domain/Aggregates/ProviderCommand/ProviderCommandKinds.cs
+path=Titan.Domain/Aggregates/ProviderCommand/Enums/ProviderCommandKinds.cs
 sha=$(gh api "repos/OpenViCloud/titan-control-plane/commits/$ref" --jq .sha)
 gh api "repos/OpenViCloud/titan-control-plane/contents/$path?ref=$sha" \
   -H "Accept: application/vnd.github.raw" > contract/ProviderCommandKinds.cs
