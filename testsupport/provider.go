@@ -40,6 +40,7 @@ type Provider struct {
 	DeleteInstanceErr      error
 	VirtualMachines        []api.InstanceFull
 	ListVirtualMachinesErr error
+	GetInstanceFullErr     error
 	Networks               []api.Network
 	CreatedNetworks        []api.NetworksPost
 	CreateNetworkErr       error
@@ -183,6 +184,20 @@ func (p *Provider) GetInstance(ctx context.Context, project string, name string)
 		return nil, NotFound("Instance not found")
 	}
 	return instance, nil
+}
+
+// GetInstanceFull finds the name among VirtualMachines, where a test puts an instance with its state.
+func (p *Provider) GetInstanceFull(ctx context.Context, project string, name string) (*api.InstanceFull, error) {
+	p.count()
+	if p.GetInstanceFullErr != nil {
+		return nil, p.GetInstanceFullErr
+	}
+	for i := range p.VirtualMachines {
+		if p.VirtualMachines[i].Name == name {
+			return &p.VirtualMachines[i], nil
+		}
+	}
+	return nil, NotFound("Instance not found")
 }
 
 func (p *Provider) CreateInstance(ctx context.Context, project string, instance api.InstancesPost) error {

@@ -18,6 +18,7 @@ type Provider interface {
 	CreateProject(ctx context.Context, project api.ProjectsPost) error
 
 	GetInstance(ctx context.Context, project string, name string) (*api.Instance, error)
+	GetInstanceFull(ctx context.Context, project string, name string) (*api.InstanceFull, error)
 	CreateInstance(ctx context.Context, project string, instance api.InstancesPost) error
 	UpdateInstanceState(ctx context.Context, project string, name string, state api.InstanceStatePut) error
 	DeleteInstance(ctx context.Context, project string, name string) error

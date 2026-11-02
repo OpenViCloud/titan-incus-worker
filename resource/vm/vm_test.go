@@ -16,6 +16,9 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
+// The commands here carry no requestId, so their reports are those of the old routes until rollout phase 6
+// (titan-ops architecture/resource-lifecycle.md#rollout); request_test.go has the commands with one.
+
 // Oracle for instanceName: python3 base32 of the UUID, as in provider/names_test.go.
 const instanceName = "vmceircejceiztgrcekvkvkvkvku"
 
@@ -185,8 +188,7 @@ func TestCreate_InstanceAlreadyExists_IsOurs_AndReportsCreated(t *testing.T) {
 	}
 }
 
-// An earlier run created the instance and died before it started: the rerun starts it, or the VM waits
-// for Running for ever.
+// An earlier run created the instance and died before it started: the rerun starts it, as the create asked.
 func TestCreate_InstanceAlreadyExistsButStopped_IsStarted_ThenReportsCreated(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
@@ -505,21 +507,6 @@ func TestDelete_DeleteRefused_IsRetryable_AndReportsNothing(t *testing.T) {
 	}
 	if len(cp.Requests()) != 0 {
 		t.Fatalf("reported while the delete has not happened: %+v", cp.Requests())
-	}
-}
-
-// A VM keeps its delete waiting when the command gives up (titan-ops architecture/desired-and-current.md#abandoned-request):
-// the give-up tells the control plane nothing.
-func TestDelete_GiveUp_SendsNothing(t *testing.T) {
-	cp := testsupport.NewControlPlane(t)
-
-	err := NewDelete(cp.Client(), clusters(testsupport.NewProvider())).GiveUp(context.Background(), deleteLeased(), errors.New("x"), testsupport.DiscardLogger())
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cp.Requests()) != 0 {
-		t.Fatalf("want no callback, got %+v", cp.Requests())
 	}
 }
 

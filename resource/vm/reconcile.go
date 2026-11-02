@@ -56,7 +56,7 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 		if !shouldReport {
 			continue
 		}
-		err := sendStatus(ctx, cp, row.Id, report)
+		err := sendObservation(ctx, cp, row.Id, report)
 		if err != nil {
 			// One VM refused must not cost the rest their report; nothing changed on the Titan side, so the next
 			// cycle sends it again.
@@ -75,8 +75,8 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 }
 
 // DecideReport compares one VM with Incus: a report when the status, the existence or an address differs from what
-// Titan recorded. Absent is NotFound, never Deleted: only the delete command reports that, since a reconciler pointed
-// at the wrong cluster also finds nothing (titan-ops architecture/desired-and-current.md#reconciler-never-dies).
+// Titan recorded. Absent is NotFound, never Deleted: only the delete command's own report ends a VM, since a reconciler
+// pointed at the wrong cluster also finds nothing (titan-ops architecture/desired-and-current.md#reconciler-never-dies).
 func DecideReport(row ReconcilableVm, byName map[string]api.InstanceFull) (statusReport, bool) {
 	instance, present := byName[row.ExternalId]
 	if !present {
