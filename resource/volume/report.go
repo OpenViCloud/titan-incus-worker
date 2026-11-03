@@ -29,9 +29,9 @@ const (
 	reasonDeleteFailed = "Volume deletion failed due to a system error. Please try again or contact support."
 )
 
-// StatusReport is the body of the old PATCH /internal/volumes/{volumeId}/status and of its snapshots' callback, and what
-// DecideVolumeReport and DecideSnapshotReport hand to the observation senders. Exists is a
-// pointer so an observation always says true or false, and the other reports leave it out. AttachedTo is the names of
+// StatusReport is the body of the old PATCH /internal/volumes/{volumeId}/status and of its snapshots' callback, and the
+// decision DecideVolumeReport and DecideSnapshotReport return, whose Exists and AttachedTo the reconciler sends on the
+// observation routes. Exists is a pointer so an observation always says true or false, and the other reports leave it out. AttachedTo is the names of
 // the instances in the volume's used_by, as Incus lists them: which are Titan VMs is the control plane's to say
 // (titan-ops features/volume/design.md#attachment-from-used-by).
 type StatusReport struct {

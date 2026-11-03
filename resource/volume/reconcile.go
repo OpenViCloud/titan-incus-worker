@@ -50,9 +50,9 @@ type observedVolume struct {
 	instances []string
 }
 
-// Reconciler observes the clusters' volumes and volume snapshots. It remembers, per volume used by an instance outside
-// Titan, the instances it last reported: the control plane records only that something outside Titan uses the volume,
-// not which instances, so without this the volume would be sent every cycle
+// Reconciler observes the clusters' volumes and volume snapshots. It remembers, per volume it reported in use, the
+// instances it last reported. That matters for a volume used by an instance outside Titan: the control plane records only
+// that something outside Titan uses it, not which instances, so without this the volume would be sent every cycle
 // (titan-ops architecture/resource-lifecycle.md#reconciler). A restart forgets, and each such volume is sent once more.
 type Reconciler struct {
 	mu            sync.Mutex
