@@ -55,7 +55,7 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if payload.RequestId == "" {
 		return sendStatus(ctx, h.cp, payload.VmId, statusReport{Report: reportDeleted})
 	}
-	return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, requestEnd{Outcome: outcomeDone})
+	return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, requestEnd{Outcome: controlplane.OutcomeDone})
 }
 
 func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {

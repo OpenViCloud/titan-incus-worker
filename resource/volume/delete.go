@@ -12,14 +12,18 @@ import (
 )
 
 type deletePayload struct {
-	VolumeId         string `json:"volumeId"`
+	VolumeId string `json:"volumeId"`
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
+	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
+	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	RequestId        string `json:"requestId"`
 	ExternalVolumeId string `json:"externalVolumeId"`
 	ProjectName      string `json:"projectName"`
 }
 
-// Delete runs volume.delete and reports Deleted. Incus refuses while the volume is attached (400, lab-storage 04): an
-// error the next lease may get past. Giving up reports the request failed, which gives the volume back
-// (titan-ops architecture/desired-and-current.md#abandoned-request).
+// Delete runs volume.delete and ends its request Done (Deleted on the old route). Incus refuses while the volume is
+// attached (400, lab-storage 04): an error the next lease may get past. Giving up ends it Failed, which gives the volume
+// back (titan-ops architecture/resource-lifecycle.md#kinds).
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -52,13 +56,19 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if isAlreadyGone {
 		logger.Info("already gone; nothing to delete", "object", payload.ExternalVolumeId)
 	}
-	return SendStatus(ctx, h.cp, payload.VolumeId, StatusReport{Report: ReportDeleted})
+	if payload.RequestId == "" {
+		return SendStatus(ctx, h.cp, payload.VolumeId, StatusReport{Report: ReportDeleted})
+	}
+	return EndRequest(ctx, h.cp, payload.VolumeId, payload.RequestId, Done("", nil))
 }
 
 func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
 	var payload deletePayload
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
+	}
+	if payload.RequestId != "" {
+		return EndRequest(ctx, h.cp, payload.VolumeId, payload.RequestId, Failed("", nil, reasonDeleteFailed, cause))
 	}
 	report := StatusReport{Report: ReportRequestFailed, Reason: reasonDeleteFailed, Detail: cause.Error()}
 	return SendStatus(ctx, h.cp, payload.VolumeId, report)

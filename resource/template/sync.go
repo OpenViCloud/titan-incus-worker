@@ -16,9 +16,6 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/loop/command"
 )
 
-// Admin-facing only, but a whole Incus error can be long.
-const maxDetail = 1000
-
 // errWrongArchitecture marks a pull Incus completed with an image no VM of the cluster can start.
 var errWrongArchitecture = errors.New("wrong architecture")
 
@@ -156,15 +153,11 @@ func (h *Sync) GiveUp(ctx context.Context, leased command.Leased, cause error, l
 	if payload.TemplateId == "" {
 		return command.Permanent(errors.New("template.sync payload lacks templateId: nobody to tell"))
 	}
-	detail := []rune(cause.Error())
-	if len(detail) > maxDetail {
-		detail = detail[:maxDetail]
-	}
 	return sendStatus(ctx, h.cp, payload.TemplateId, statusReport{
 		Report:    reportRequestFailed,
 		ClusterId: leased.ClusterId,
 		Reason:    giveUpReason(cause),
-		Detail:    string(detail),
+		Detail:    controlplane.Detail(cause),
 	})
 }
 

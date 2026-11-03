@@ -484,7 +484,8 @@ func TestDecideSnapshotReport(t *testing.T) {
 }
 
 // Reconciler never reports Deleted: a volume gone is NotFound, whatever was asked
-// (titan-ops architecture/desired-and-current.md#existence-axis).
+// (titan-ops architecture/desired-and-current.md#existence-axis). It reports on the observation routes
+// (titan-ops architecture/resource-lifecycle.md#callback-routes).
 func TestReconcile_ReadsTheSnapshotsOfAVolumeOnce_AndReportsEachChange_NeverDeleted(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	cp.Respond("GET", "/internal/reconcile/volumes?clusterId=mock", 200, `{
@@ -499,7 +500,7 @@ func TestReconcile_ReadsTheSnapshotsOfAVolumeOnce_AndReportsEachChange_NeverDele
 	p.VolumeSnapshots[project+"/vola/sone"] = true
 	logger, logs := testsupport.NewLogCapture(t)
 
-	err := Reconcile(context.Background(), cp.Client(), p, clusterId, "", logger)
+	err := NewReconciler().Reconcile(context.Background(), cp.Client(), p, clusterId, "", logger)
 
 	if err != nil {
 		t.Fatal(err)
@@ -515,21 +516,22 @@ func TestReconcile_ReadsTheSnapshotsOfAVolumeOnce_AndReportsEachChange_NeverDele
 		reports[request.Path] = body
 	}
 	want := map[string]bool{
-		"/internal/volumes/v1/status":              true,
-		"/internal/volumes/v2/status":              false,
-		"/internal/volumes/v1/snapshots/s1/status": true,
-		"/internal/volumes/v1/snapshots/s2/status": false,
+		"/internal/volumes/v1/observation":              true,
+		"/internal/volumes/v2/observation":              false,
+		"/internal/volumes/v1/snapshots/s1/observation": true,
+		"/internal/volumes/v1/snapshots/s2/observation": false,
 	}
 	if len(reports) != len(want) {
 		t.Fatalf("reports %v, want %v", reports, want)
 	}
 	for path, exists := range want {
 		body := reports[path]
-		if body["report"] != "Observed" || body["exists"] != exists {
-			t.Errorf("%s: %v, want Observed exists=%v", path, body, exists)
+		if body["exists"] != exists {
+			t.Errorf("%s: %v, want exists=%v", path, body, exists)
 		}
 	}
-	if names := attachedTo(reports["/internal/volumes/v1/status"]); len(names) != 1 || names[0] != instance {
+	observed, _ := reports["/internal/volumes/v1/observation"]["observed"].(map[string]any)
+	if names := attachedTo(observed); len(names) != 1 || names[0] != instance {
 		t.Errorf("v1 attachedTo %v", names)
 	}
 	volumeLines := map[any]map[string]any{}
@@ -561,7 +563,7 @@ func TestReconcile_FailedPoolRead_ReportsNothing(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.ListVolumesErr = errors.New("connection refused")
 
-	err := Reconcile(context.Background(), cp.Client(), p, clusterId, "", slog.Default())
+	err := NewReconciler().Reconcile(context.Background(), cp.Client(), p, clusterId, "", slog.Default())
 
 	if err == nil || len(cp.RequestsTo("PATCH")) != 0 {
 		t.Fatalf("err %v, reports %+v", err, cp.RequestsTo("PATCH"))

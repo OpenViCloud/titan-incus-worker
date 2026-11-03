@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/lxc/incus/v7/shared/api"
@@ -17,7 +18,11 @@ import (
 
 // attachPayload mirrors EnqueueVolumeAttachAsync and EnqueueVolumeDetachAsync (detach has no externalVmId).
 type attachPayload struct {
-	VolumeId         string `json:"volumeId"`
+	VolumeId string `json:"volumeId"`
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
+	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
+	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	RequestId        string `json:"requestId"`
 	ExternalVolumeId string `json:"externalVolumeId"`
 	ExternalVmId     string `json:"externalVmId"`
 	ProjectName      string `json:"projectName"`
@@ -25,6 +30,7 @@ type attachPayload struct {
 
 // Attach runs volume.attach: a disk device named after the volume, hot-plugged by PATCH (lab-storage 04: works on a
 // running VM, and the same PATCH again is a no-op). It reports what Incus then shows: the instances using the volume.
+// With a request id that report is the attach's Done; without one, an observation on the old route.
 type Attach struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -61,17 +67,24 @@ func (h *Attach) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return err
 	}
-	return reportWhatIncusShows(ctx, h.cp, cl.Provider, payload, provider.StoragePoolOrDefault(cl.StoragePool))
+	return reportWhatIncusShows(ctx, h.cp, cl.Provider, payload, provider.StoragePoolOrDefault(cl.StoragePool), logger)
 }
 
 // GiveUp reports the request failed, carrying what Incus shows: an attach that happened while its report failed is then
-// fulfilled by it, and only one that did not is withdrawn.
+// done, and only one that did not is withdrawn.
 func (h *Attach) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
-	return giveUp(ctx, h.cp, h.clusters, leased, cause, reasonAttachFailed)
+	return giveUp(ctx, h.cp, h.clusters, leased, cause, reasonAttachFailed, func(names []string, payload attachPayload) bool {
+		return slices.Contains(names, payload.ExternalVmId)
+	})
 }
 
-// reportWhatIncusShows reads the volume after an attach or detach and reports it.
-func reportWhatIncusShows(ctx context.Context, cp *controlplane.Client, p provider.Provider, payload attachPayload, pool string) error {
+// reportWhatIncusShows reads the volume after an attach or detach and reports it. On the old route a failed read is
+// retried, since that report is the only one the request gets; with a request id the Done goes without it.
+func reportWhatIncusShows(ctx context.Context, cp *controlplane.Client, p provider.Provider, payload attachPayload, pool string, logger *slog.Logger) error {
+	if payload.RequestId != "" {
+		observed := readObservation(ctx, p, payload.ProjectName, pool, payload.ExternalVolumeId, logger)
+		return EndRequest(ctx, cp, payload.VolumeId, payload.RequestId, Done("", observed))
+	}
 	volume, err := p.GetVolume(ctx, payload.ProjectName, pool, payload.ExternalVolumeId)
 	if err != nil {
 		return err
@@ -80,14 +93,27 @@ func reportWhatIncusShows(ctx context.Context, cp *controlplane.Client, p provid
 }
 
 // giveUp is the attach's and the detach's: the request failed, plus what Incus shows when it can be read — the volume
-// gone, or the instances using it. Unreadable, the report says only that the request failed.
-func giveUp(ctx context.Context, cp *controlplane.Client, clusters cluster.Clusters, leased command.Leased, cause error, reason string) error {
+// gone, or the instances using it. Unreadable, the report says only that the request failed. With a request id, Incus
+// showing what was asked (reached) makes the report the request's Done: the work happened, only its report was lost.
+func giveUp(ctx context.Context, cp *controlplane.Client, clusters cluster.Clusters, leased command.Leased, cause error,
+	reason string, reached func(names []string, payload attachPayload) bool) error {
 	var payload attachPayload
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	report := StatusReport{Report: ReportRequestFailed, Reason: reason, Detail: cause.Error()}
 	observation, read := readAttachment(ctx, clusters, leased.ClusterId, payload)
+	if payload.RequestId != "" {
+		isThere := read && *observation.Exists
+		if !isThere {
+			return EndRequest(ctx, cp, payload.VolumeId, payload.RequestId, Failed("", nil, reason, cause))
+		}
+		observed := &Observation{AttachedTo: observation.AttachedTo}
+		if reached(observation.AttachedTo, payload) {
+			return EndRequest(ctx, cp, payload.VolumeId, payload.RequestId, Done("", observed))
+		}
+		return EndRequest(ctx, cp, payload.VolumeId, payload.RequestId, Failed("", observed, reason, cause))
+	}
+	report := StatusReport{Report: ReportRequestFailed, Reason: reason, Detail: cause.Error()}
 	if read {
 		report.Exists = observation.Exists
 		report.AttachedTo = observation.AttachedTo

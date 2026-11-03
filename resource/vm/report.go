@@ -31,14 +31,6 @@ const (
 	reasonDeleteFailed    = "The VM could not be deleted. Please try again or contact support."
 )
 
-// maxDetail is how many runes of the raw error a Failed sends (titan-ops architecture/resource-lifecycle.md#callback-routes).
-const maxDetail = 1000
-
-const (
-	outcomeDone   = "Done"
-	outcomeFailed = "Failed"
-)
-
 // requestEnd is the body of PATCH /internal/vms/{vmId}/requests/{requestId}: the report that ends the request it names
 // (titan-ops architecture/resource-lifecycle.md#callback-routes).
 type requestEnd struct {
@@ -64,7 +56,7 @@ type observationBody struct {
 }
 
 func sendRequestEnd(ctx context.Context, cp *controlplane.Client, vmId string, requestId string, end requestEnd) error {
-	return cp.Patch(ctx, "/internal/vms/"+url.PathEscape(vmId)+"/requests/"+url.PathEscape(requestId), end)
+	return cp.Patch(ctx, controlplane.RequestPath(vmPath(vmId), requestId), end)
 }
 
 func sendObservation(ctx context.Context, cp *controlplane.Client, vmId string, report statusReport) error {
@@ -72,7 +64,11 @@ func sendObservation(ctx context.Context, cp *controlplane.Client, vmId string, 
 	if body.Exists {
 		body.Observed = &observedBody{Status: report.Status, IpAddress: report.IpAddress, PublicIpv6Address: report.PublicIpv6Address}
 	}
-	return cp.Patch(ctx, "/internal/vms/"+url.PathEscape(vmId)+"/observation", body)
+	return cp.Patch(ctx, controlplane.ObservationPath(vmPath(vmId)), body)
+}
+
+func vmPath(vmId string) string {
+	return "/internal/vms/" + url.PathEscape(vmId)
 }
 
 // readObserved reads the instance once after a command did its work. A read that fails does not undo that work, so the
@@ -87,11 +83,7 @@ func readObserved(ctx context.Context, p provider.Provider, project string, name
 }
 
 func failedEnd(externalId string, reason string, cause error) requestEnd {
-	detail := []rune(cause.Error())
-	if len(detail) > maxDetail {
-		detail = detail[:maxDetail]
-	}
-	return requestEnd{Outcome: outcomeFailed, ExternalId: externalId, Reason: reason, Detail: string(detail)}
+	return requestEnd{Outcome: controlplane.OutcomeFailed, ExternalId: externalId, Reason: reason, Detail: controlplane.Detail(cause)}
 }
 
 // statusReport is the body of the old PATCH /internal/vms/{vmId}/status, which a command without a request id still

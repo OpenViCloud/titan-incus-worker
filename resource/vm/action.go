@@ -97,7 +97,7 @@ func (h *Action) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 		return nil
 	}
 	observed := readObserved(ctx, cl.Provider, payload.ProjectName, payload.ExternalVmId, logger)
-	return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, requestEnd{Outcome: outcomeDone, Observed: observed})
+	return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, requestEnd{Outcome: controlplane.OutcomeDone, Observed: observed})
 }
 
 func (h *Action) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {

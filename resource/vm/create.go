@@ -86,7 +86,7 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 		return sendStatus(ctx, h.cp, payload.VmId, statusReport{Report: reportCreated, ExternalId: request.Name})
 	}
 	observed := readObserved(ctx, cl.Provider, payload.ProjectName, request.Name, logger)
-	return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, requestEnd{Outcome: outcomeDone, ExternalId: request.Name, Observed: observed})
+	return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, requestEnd{Outcome: controlplane.OutcomeDone, ExternalId: request.Name, Observed: observed})
 }
 
 // GiveUp reports the request failure. It carries the provider id when the instance exists, from this run or an earlier

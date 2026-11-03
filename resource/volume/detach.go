@@ -12,7 +12,7 @@ import (
 )
 
 // Detach runs volume.detach. The command names no VM: the volume's used_by does. Each instance using it gets a PUT
-// without the volume's disk device (lab-storage 04b). It reports what Incus then shows.
+// without the volume's disk device (lab-storage 04b). It reports what Incus then shows, as Attach does.
 type Detach struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -48,13 +48,15 @@ func (h *Detach) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 			return err
 		}
 	}
-	return reportWhatIncusShows(ctx, h.cp, cl.Provider, payload, pool)
+	return reportWhatIncusShows(ctx, h.cp, cl.Provider, payload, pool, logger)
 }
 
 // GiveUp reports the request failed, carrying what Incus shows: a detach that happened while its report failed is then
-// fulfilled by it, and only one that did not is withdrawn.
+// done, and only one that did not is withdrawn.
 func (h *Detach) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
-	return giveUp(ctx, h.cp, h.clusters, leased, cause, reasonDetachFailed)
+	return giveUp(ctx, h.cp, h.clusters, leased, cause, reasonDetachFailed, func(names []string, _ attachPayload) bool {
+		return len(names) == 0
+	})
 }
 
 // removeDisk drops every disk device of the instance whose source is the volume. An instance gone has no device left.

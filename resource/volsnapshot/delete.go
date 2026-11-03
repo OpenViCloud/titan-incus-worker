@@ -14,14 +14,18 @@ import (
 
 // deletePayload mirrors EnqueueVolumeSnapshotDeleteAsync.
 type deletePayload struct {
-	SnapshotId         string `json:"snapshotId"`
+	SnapshotId string `json:"snapshotId"`
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
+	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
+	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	RequestId          string `json:"requestId"`
 	VolumeId           string `json:"volumeId"`
 	ExternalSnapshotId string `json:"externalSnapshotId"`
 	ProjectName        string `json:"projectName"`
 }
 
-// Delete runs volume-snapshot.delete and reports Deleted; giving up reports the request failed, which gives the snapshot
-// back (titan-ops architecture/desired-and-current.md#abandoned-request).
+// Delete runs volume-snapshot.delete and ends its request Done (Deleted on the old route); giving up ends it Failed,
+// which gives the snapshot back (titan-ops architecture/resource-lifecycle.md#kinds).
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -58,6 +62,9 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if isAlreadyGone {
 		logger.Info("already gone; nothing to delete", "object", provider.SnapshotId(parent, name))
 	}
+	if payload.RequestId != "" {
+		return volume.EndSnapshotRequest(ctx, h.cp, payload.VolumeId, payload.SnapshotId, payload.RequestId, volume.Done("", nil))
+	}
 	report := volume.StatusReport{Report: volume.ReportDeleted}
 	return volume.SendSnapshotStatus(ctx, h.cp, payload.VolumeId, payload.SnapshotId, report)
 }
@@ -66,6 +73,10 @@ func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	var payload deletePayload
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
+	}
+	if payload.RequestId != "" {
+		end := volume.Failed("", nil, reasonDeleteFailed, cause)
+		return volume.EndSnapshotRequest(ctx, h.cp, payload.VolumeId, payload.SnapshotId, payload.RequestId, end)
 	}
 	report := volume.StatusReport{Report: volume.ReportRequestFailed, Reason: reasonDeleteFailed, Detail: cause.Error()}
 	return volume.SendSnapshotStatus(ctx, h.cp, payload.VolumeId, payload.SnapshotId, report)
