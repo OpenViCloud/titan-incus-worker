@@ -14,14 +14,18 @@ import (
 
 // createPayload mirrors ProviderCommandQueue.EnqueueVolumeSnapshotCreateAsync.
 type createPayload struct {
-	SnapshotId       string `json:"snapshotId"`
+	SnapshotId string `json:"snapshotId"`
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
+	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
+	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	RequestId        string `json:"requestId"`
 	VolumeId         string `json:"volumeId"`
 	ExternalVolumeId string `json:"externalVolumeId"`
 	ProjectName      string `json:"projectName"`
 }
 
-// Create runs volume-snapshot.create. Incus has made it once the operation returns, so it reports Created with the
-// provider id "<volume>/<snapshot>": the create is done.
+// Create runs volume-snapshot.create. Incus has made it once the operation returns, so the create is done: Done with
+// the provider id "<volume>/<snapshot>".
 type Create struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -59,6 +63,9 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if isOurs {
 		logger.Info("already exists; treating it as ours", "object", externalId)
 	}
+	if payload.RequestId != "" {
+		return volume.EndSnapshotRequest(ctx, h.cp, payload.VolumeId, payload.SnapshotId, payload.RequestId, volume.Done(externalId, nil))
+	}
 	report := volume.StatusReport{Report: volume.ReportCreated, ExternalId: externalId}
 	return volume.SendSnapshotStatus(ctx, h.cp, payload.VolumeId, payload.SnapshotId, report)
 }
@@ -69,8 +76,12 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	report := volume.StatusReport{Report: volume.ReportRequestFailed, Reason: reasonCreateFailed, Detail: cause.Error()}
-	report.ExternalId = h.existingSnapshot(ctx, leased.ClusterId, payload)
+	existing := h.existingSnapshot(ctx, leased.ClusterId, payload)
+	if payload.RequestId != "" {
+		end := volume.Failed(existing, nil, reasonCreateFailed, cause)
+		return volume.EndSnapshotRequest(ctx, h.cp, payload.VolumeId, payload.SnapshotId, payload.RequestId, end)
+	}
+	report := volume.StatusReport{Report: volume.ReportRequestFailed, Reason: reasonCreateFailed, Detail: cause.Error(), ExternalId: existing}
 	return volume.SendSnapshotStatus(ctx, h.cp, payload.VolumeId, payload.SnapshotId, report)
 }
 

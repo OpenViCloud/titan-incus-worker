@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"slices"
+	"strings"
+	"sync"
 
 	"github.com/lxc/incus/v7/shared/api"
 
@@ -47,12 +50,25 @@ type observedVolume struct {
 	instances []string
 }
 
-// Reconcile observes one cluster's volumes and volume snapshots and reports what differs; it never acts on Incus, and it
-// never reports Deleted: a volume or snapshot gone is NotFound, only Titan's own delete command says Deleted
-// (titan-ops architecture/desired-and-current.md#existence-axis). The all-projects volume list has no snapshots
-// (lab-storage 02), so the snapshots of each volume are one more read. A failed read skips what it would have said:
-// reading it as "nothing there" would report everything gone.
-func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, storagePool string, logger *slog.Logger) error {
+// Reconciler observes the clusters' volumes and volume snapshots. It remembers, per volume it reported in use, the
+// instances it last reported. That matters for a volume used by an instance outside Titan: the control plane records only
+// that something outside Titan uses it, not which instances, so without this the volume would be sent every cycle
+// (titan-ops architecture/resource-lifecycle.md#reconciler). A restart forgets, and each such volume is sent once more.
+type Reconciler struct {
+	mu        sync.Mutex
+	sentInUse map[string]string
+}
+
+func NewReconciler() *Reconciler {
+	return &Reconciler{sentInUse: map[string]string{}}
+}
+
+// Reconcile observes one cluster's volumes and volume snapshots and reports what differs on their observation routes;
+// it never acts on Incus, and it never reports Deleted: a volume or snapshot gone is NotFound, only Titan's own delete
+// command ends one (titan-ops architecture/desired-and-current.md#existence-axis). The all-projects volume list has no
+// snapshots (lab-storage 02), so the snapshots of each volume are one more read. A failed read skips what it would have
+// said: reading it as "nothing there" would report everything gone.
+func (r *Reconciler) Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, storagePool string, logger *slog.Logger) error {
 	pool := provider.StoragePoolOrDefault(storagePool)
 	var rows reconcilableStorage
 	if err := cp.GetJSON(ctx, "/internal/reconcile/volumes?clusterId="+url.QueryEscape(clusterId), &rows); err != nil {
@@ -69,14 +85,15 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 
 	for _, row := range rows.Volumes {
 		report, shouldReport := DecideVolumeReport(row, observed)
-		if !shouldReport {
+		if !shouldReport || r.sentAlready(row, report) {
 			continue
 		}
-		err := SendStatus(ctx, cp, row.Id, report)
+		err := sendObservation(ctx, cp, row.Id, *report.Exists, report.AttachedTo)
 		if err != nil {
 			logger.Warn("volume report failed; next cycle sends it again", "volumeId", row.Id, "error", err)
 			continue
 		}
+		r.remember(row, report)
 		logger.Info("reconcile report sent", "volumeId", row.Id, "recordedExistence", row.CurrentExistence,
 			"exists", *report.Exists, "attachedTo", report.AttachedTo)
 	}
@@ -104,7 +121,7 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 		if !shouldReport {
 			continue
 		}
-		err := SendSnapshotStatus(ctx, cp, row.VolumeId, row.Id, report)
+		err := sendSnapshotObservation(ctx, cp, row.VolumeId, row.Id, *report.Exists)
 		if err != nil {
 			logger.Warn("volume snapshot report failed; next cycle sends it again", "snapshotId", row.Id, "error", err)
 			continue
@@ -113,6 +130,35 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 			"recordedExistence", row.CurrentExistence, "exists", *report.Exists)
 	}
 	return nil
+}
+
+// sentAlready: a volume recorded as used outside Titan whose instances are the ones last reported has nothing new to say.
+func (r *Reconciler) sentAlready(row ReconcilableVolume, report StatusReport) bool {
+	if !row.CurrentAttachedElsewhere || !*report.Exists {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	sent, known := r.sentInUse[row.Id]
+	return known && sent == instanceSet(report.AttachedTo)
+}
+
+// remember keeps the instances just reported for every volume reported in use, since the control plane may record any
+// of them as used outside Titan, and forgets a volume reported free or gone.
+func (r *Reconciler) remember(row ReconcilableVolume, report StatusReport) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !*report.Exists || len(report.AttachedTo) == 0 {
+		delete(r.sentInUse, row.Id)
+		return
+	}
+	r.sentInUse[row.Id] = instanceSet(report.AttachedTo)
+}
+
+func instanceSet(names []string) string {
+	sorted := slices.Clone(names)
+	slices.Sort(sorted)
+	return strings.Join(sorted, "\n")
 }
 
 // ObserveVolumes keys the pool's custom volumes by name, with the instances using each. Instance and image volumes
@@ -154,7 +200,8 @@ func DecideVolumeReport(row ReconcilableVolume, observed map[string]observedVolu
 }
 
 // attachmentChanged compares the instances using the volume with the Titan VM last recorded. The worker cannot tell
-// an instance outside Titan from another Titan VM, so a volume recorded as used elsewhere is always sent.
+// an instance outside Titan from another Titan VM, so a volume recorded as used elsewhere is always a candidate; the
+// Reconciler sends it only when its instances changed since the last report.
 func attachmentChanged(row ReconcilableVolume, instances []string) bool {
 	if row.CurrentAttachedElsewhere {
 		return true

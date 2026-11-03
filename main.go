@@ -156,7 +156,7 @@ func reconcilers() []reconcile.Kind {
 		{Name: "networks", Reconcile: reconcilerOfTheProvider(network.Reconcile)},
 		{Name: "firewall-rules", Reconcile: reconcilerOfTheProvider(firewall.Reconcile)},
 		{Name: "templates", Reconcile: reconcilerOfTheProvider(template.Reconcile)},
-		{Name: "volumes", Reconcile: reconcileVolumes},
+		{Name: "volumes", Reconcile: reconcileVolumes(volume.NewReconciler())},
 		{Name: "vm-snapshots", Reconcile: reconcilerOfTheProvider(vmsnapshot.Reconcile)},
 		{Name: "load-balancers", Reconcile: reconcilerOfTheProvider(loadbalancer.Reconcile)},
 	}
@@ -171,9 +171,11 @@ func reconcilerOfTheProvider(reconcileKind providerReconciler) func(context.Cont
 	}
 }
 
-// reconcileVolumes also needs the cluster's storage pool.
-func reconcileVolumes(ctx context.Context, cp *controlplane.Client, cl *cluster.Cluster, clusterId string, logger *slog.Logger) error {
-	return volume.Reconcile(ctx, cp, cl.Provider, clusterId, cl.StoragePool, logger)
+// reconcileVolumes also needs the cluster's storage pool; one Reconciler for every cluster keeps what it reported.
+func reconcileVolumes(volumes *volume.Reconciler) func(context.Context, *controlplane.Client, *cluster.Cluster, string, *slog.Logger) error {
+	return func(ctx context.Context, cp *controlplane.Client, cl *cluster.Cluster, clusterId string, logger *slog.Logger) error {
+		return volumes.Reconcile(ctx, cp, cl.Provider, clusterId, cl.StoragePool, logger)
+	}
 }
 
 func healthServer(addr string) *http.Server {

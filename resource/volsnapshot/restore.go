@@ -16,15 +16,18 @@ import (
 
 // restorePayload mirrors EnqueueVolumeSnapshotRestoreAsync.
 type restorePayload struct {
-	SnapshotId         string `json:"snapshotId"`
-	NewVolumeId        string `json:"newVolumeId"`
+	SnapshotId  string `json:"snapshotId"`
+	NewVolumeId string `json:"newVolumeId"`
+	// RequestId is the new volume's create request (titan-ops architecture/resource-lifecycle.md#kinds); empty on a
+	// command of the old control plane, which keeps the old reporting until rollout phase 6.
+	RequestId          string `json:"requestId"`
 	ExternalSnapshotId string `json:"externalSnapshotId"`
 	Name               string `json:"name"`
 	ProjectName        string `json:"projectName"`
 }
 
-// Restore runs volume-snapshot.restore: a copy of the snapshot as a new volume (lab-storage 03). It reports on the new
-// volume, like a volume create: Created with its provider id, once the copy has finished.
+// Restore runs volume-snapshot.restore: a copy of the snapshot as a new volume (lab-storage 03). It ends the new volume's
+// create, like a volume create: Done with its provider id and what Incus then shows of it, once the copy has finished.
 type Restore struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -68,6 +71,10 @@ func (h *Restore) Run(ctx context.Context, leased command.Leased, logger *slog.L
 	if isOurs {
 		logger.Info("already exists; treating it as ours", "object", name)
 	}
+	if payload.RequestId != "" {
+		observed := volume.ReadObservation(ctx, cl.Provider, payload.ProjectName, pool, name, logger)
+		return volume.EndRequest(ctx, h.cp, payload.NewVolumeId, payload.RequestId, volume.Done(name, observed))
+	}
 	return volume.SendStatus(ctx, h.cp, payload.NewVolumeId, volume.StatusReport{Report: volume.ReportCreated, ExternalId: name})
 }
 
@@ -76,7 +83,11 @@ func (h *Restore) GiveUp(ctx context.Context, leased command.Leased, cause error
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	report := volume.StatusReport{Report: volume.ReportRequestFailed, Reason: volume.ReasonCreateFailed, Detail: cause.Error()}
-	report.ExternalId = volume.ExistingVolume(ctx, h.clusters, leased.ClusterId, payload.ProjectName, payload.NewVolumeId)
+	existing := volume.ExistingVolume(ctx, h.clusters, leased.ClusterId, payload.ProjectName, payload.NewVolumeId)
+	if payload.RequestId != "" {
+		end := volume.Failed(existing, nil, volume.ReasonCreateFailed, cause)
+		return volume.EndRequest(ctx, h.cp, payload.NewVolumeId, payload.RequestId, end)
+	}
+	report := volume.StatusReport{Report: volume.ReportRequestFailed, Reason: volume.ReasonCreateFailed, Detail: cause.Error(), ExternalId: existing}
 	return volume.SendStatus(ctx, h.cp, payload.NewVolumeId, report)
 }

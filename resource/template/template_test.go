@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/OpenViCloud/titan-incus-worker/controlplane"
 	"github.com/OpenViCloud/titan-incus-worker/incus/cluster"
 	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 	"github.com/OpenViCloud/titan-incus-worker/loop/command"
@@ -227,7 +228,7 @@ func TestSync_GiveUp_NamesTheCauseInTheReason(t *testing.T) {
 
 func TestSync_GiveUp_CutsALongErrorAtTheDetailLimit(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
-	long := strings.Repeat("é", maxDetail+10)
+	long := strings.Repeat("é", controlplane.MaxDetail+10)
 
 	err := NewSync(cp.Client(), cluster.Fixed{}, imageServer).GiveUp(context.Background(), syncLeased(), errors.New(long), testsupport.DiscardLogger())
 
@@ -235,8 +236,8 @@ func TestSync_GiveUp_CutsALongErrorAtTheDetailLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	detail, _ := onlyBody(t, cp)["detail"].(string)
-	if len([]rune(detail)) != maxDetail {
-		t.Fatalf("detail is %d runes, want %d", len([]rune(detail)), maxDetail)
+	if len([]rune(detail)) != controlplane.MaxDetail {
+		t.Fatalf("detail is %d runes, want %d", len([]rune(detail)), controlplane.MaxDetail)
 	}
 }
 
