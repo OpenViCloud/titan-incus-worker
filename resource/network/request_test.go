@@ -13,6 +13,7 @@ import (
 
 	"github.com/OpenViCloud/titan-incus-worker/controlplane"
 	"github.com/OpenViCloud/titan-incus-worker/incus/cluster"
+	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 	"github.com/OpenViCloud/titan-incus-worker/loop/command"
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
@@ -239,9 +240,9 @@ func TestDelete_WithARequest_EndsItDone_WithoutAnObservation(t *testing.T) {
 	}
 }
 
-// A delete whose network Incus no longer has gives nothing back to the tenant: its give-up is the request's Done. One
-// whose network is still there is Failed.
-func TestDelete_WithARequest_GiveUp_IsDone_WhenIncusNoLongerHasTheNetwork_ElseFailed(t *testing.T) {
+// A delete whose network and ACL Incus no longer has gives nothing back to the tenant: its give-up is the request's
+// Done. One whose network is still there is Failed.
+func TestDelete_WithARequest_GiveUp_IsDone_WhenIncusNoLongerHasTheNetworkNorItsAcl_ElseFailed(t *testing.T) {
 	for _, exists := range []bool{true, false} {
 		cp := testsupport.NewControlPlane(t)
 		p := testsupport.NewProvider()
@@ -264,10 +265,44 @@ func TestDelete_WithARequest_GiveUp_IsDone_WhenIncusNoLongerHasTheNetwork_ElseFa
 	}
 }
 
-func TestDelete_WithARequest_GiveUp_NetworkGoneButItsAclStays_IsFailed(t *testing.T) {
+func TestDelete_WithARequest_GiveUp_NetworkGone_DeletesItsAcl_AndIsDone(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
-	p.DeleteACLErr = errors.New("acl in use")
+	aclKey := project + "/" + provider.NetworkAclName(networkId)
+	p.ACLs = map[string]*api.NetworkACL{aclKey: {}}
+
+	err := giveUpCommand(newDelete(cp, p), withRequest(deleteLeased()), errors.New("acl in use"))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, stays := p.ACLs[aclKey]; stays {
+		t.Errorf("acl %s was not deleted", aclKey)
+	}
+	if body := requestEnd(t, cp); body["outcome"] != "Done" {
+		t.Errorf("report %v", body)
+	}
+}
+
+func TestDelete_WithARequest_GiveUp_AclDeleteMayPass_IsRetryable_AndReportsNothing(t *testing.T) {
+	cp := testsupport.NewControlPlane(t)
+	p := testsupport.NewProvider()
+	p.DeleteACLErr = errors.New("incus unreachable")
+
+	err := giveUpCommand(newDelete(cp, p), withRequest(deleteLeased()), errors.New("incus unreachable"))
+
+	if err == nil || !command.IsRetryable(err) {
+		t.Fatalf("want retryable, got %v", err)
+	}
+	if len(cp.Requests()) != 0 {
+		t.Fatalf("reported %v", cp.Requests())
+	}
+}
+
+func TestDelete_WithARequest_GiveUp_NetworkGoneButIncusRefusesItsAcl_IsFailed(t *testing.T) {
+	cp := testsupport.NewControlPlane(t)
+	p := testsupport.NewProvider()
+	p.DeleteACLErr = command.Permanent(errors.New("acl in use"))
 
 	err := giveUpCommand(newDelete(cp, p), withRequest(deleteLeased()), errors.New("acl in use"))
 
