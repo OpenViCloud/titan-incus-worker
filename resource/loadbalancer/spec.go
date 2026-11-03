@@ -28,9 +28,14 @@ type backend struct {
 	ExternalVmId string `json:"externalVmId"`
 }
 
-// specPayload is what load-balancer.create and load-balancer.update carry: the whole asked configuration.
+// specPayload is what load-balancer.create and load-balancer.update carry: the whole asked configuration. An update's
+// intentId equals its requestId; only the old route reads it.
 type specPayload struct {
-	LoadBalancerId    string     `json:"loadBalancerId"`
+	LoadBalancerId string `json:"loadBalancerId"`
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
+	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
+	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	RequestId         string     `json:"requestId"`
 	IntentId          string     `json:"intentId"`
 	ProjectName       string     `json:"projectName"`
 	ExternalNetworkId string     `json:"externalNetworkId"`
