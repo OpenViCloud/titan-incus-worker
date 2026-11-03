@@ -14,6 +14,8 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
+// The commands here carry no requestId, so they report on the old route; request_test.go has the ones that do.
+
 const (
 	snapshotId = "11111111-2222-3333-4444-555555555555"
 	// Oracle: python3 base32 of snapshotId, as in provider/names_test.go.

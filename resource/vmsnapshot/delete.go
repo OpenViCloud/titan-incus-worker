@@ -12,7 +12,7 @@ import (
 
 // Delete runs vm-snapshot.delete and ends its request Done (Deleted on the old route). Giving up ends it Failed, which
 // gives the snapshot back (titan-ops architecture/desired-and-current.md#abandoned-request), unless Incus no longer has
-// the snapshot.
+// the snapshot (RequestFailed on the old route, which reads nothing).
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -68,8 +68,8 @@ func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	return endRequest(ctx, h.cp, payload.VmId, payload.SnapshotId, payload.RequestId, end)
 }
 
-// snapshotIsGone is true only when Incus answers 404, which a VM gone along with its snapshots answers too. A payload or
-// cluster that cannot be read from tells nothing, which is not gone.
+// snapshotIsGone is true only when Incus answers 404, which a VM gone along with its snapshots answers too. A payload
+// without what the read needs, or a cluster the worker is not configured for, tells nothing, which is not gone.
 func (h *Delete) snapshotIsGone(ctx context.Context, clusterId string, payload snapshotPayload) (bool, error) {
 	instance, snapshot, err := provider.SplitSnapshotId(payload.ExternalSnapshotId)
 	if err != nil || payload.ProjectName == "" {

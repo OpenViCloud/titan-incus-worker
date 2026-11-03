@@ -16,8 +16,9 @@ import (
 )
 
 // A command that carries a requestId ends that request on its own route
-// (titan-ops architecture/resource-lifecycle.md#callback-routes): Done after its one write, Failed with a fixed reason
-// and the raw error, cut, as detail. vmsnapshot_test.go keeps the commands without one, on the old route.
+// (titan-ops architecture/resource-lifecycle.md#callback-routes): Done after its one write, or a delete's give-up that
+// finds the snapshot gone; Failed with a fixed reason and the raw error, cut, as detail. The tests named
+// WithoutARequest here, and vmsnapshot_test.go, keep the commands without one on the old route.
 
 const requestId = "77777777-6666-5555-4444-333333333333"
 
@@ -234,7 +235,7 @@ func TestDelete_WithARequest_GiveUp_IsDone_WhenIncusNoLongerHasTheSnapshot_ElseF
 	}
 }
 
-// A cluster this worker cannot read from says nothing about the snapshot: not gone, so the delete gives the snapshot back.
+// A cluster the worker is not configured for says nothing about the snapshot: not gone, so the delete gives it back.
 func TestDelete_WithARequest_GiveUp_OnAClusterItCannotRead_IsFailed(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 

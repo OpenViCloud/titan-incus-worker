@@ -27,8 +27,9 @@ const (
 )
 
 // Reconcile observes one cluster's VM snapshots and reports what differs on their observation route; it never acts on
-// Incus, never ends a request, and never reports Deleted: a snapshot gone is NotFound (titan-ops architecture/desired-and-current.md#existence-axis). The all-projects
-// instance list (recursion=2) carries each instance's snapshots (lab-storage 05), so one read covers them all.
+// Incus, never ends a request, and never reports Deleted: a snapshot gone is NotFound
+// (titan-ops architecture/desired-and-current.md#existence-axis). The all-projects instance list (recursion=2) carries
+// each instance's snapshots (lab-storage 05), so one read covers them all.
 func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error {
 	var rows []ReconcilableVmSnapshot
 	if err := cp.GetJSON(ctx, "/internal/reconcile/vm-snapshots?clusterId="+url.QueryEscape(clusterId), &rows); err != nil {
@@ -72,7 +73,7 @@ func SnapshotsByInstance(instances []api.InstanceFull) map[string]map[string]boo
 	return byInstance
 }
 
-// DecideReport: seeing a snapshot only says it exists, so it can never end a revert that has not happened. A VM gone
+// DecideReport: seeing a snapshot only says it exists, so it ends no request. A VM gone
 // says nothing: its delete settles its snapshots. A snapshot gone from a VM still there is NotFound unless already
 // recorded.
 func DecideReport(row ReconcilableVmSnapshot, snapshotsByInstance map[string]map[string]bool) (ObservationBody, bool) {
