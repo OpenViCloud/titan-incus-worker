@@ -19,8 +19,16 @@ import (
 // errWrongArchitecture marks a pull Incus completed with an image no VM of the cluster can start.
 var errWrongArchitecture = errors.New("wrong architecture")
 
+// errImageNotListed: the alias points to an image the image list does not show, so its architecture is unknown.
+var errImageNotListed = errors.New("not in the image list")
+
 type syncPayload struct {
-	TemplateId     string `json:"templateId"`
+	TemplateId string `json:"templateId"`
+	// RequestId names the sync request this command ends
+	// (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty on a command of the old control plane that
+	// the migration gave no id: it keeps the old reporting until rollout phase 6
+	// (titan-ops architecture/resource-lifecycle.md#rollout).
+	RequestId      string `json:"requestId"`
 	Name           string `json:"name"`
 	Description    string `json:"description"`
 	OsImageName    string `json:"osImageName"`
@@ -29,7 +37,9 @@ type syncPayload struct {
 }
 
 // Sync puts the template's VM image into the cluster under the template's alias: the distro's own image when
-// the template has an imageUrl, else osImageName pulled from the image server.
+// the template has an imageUrl, else osImageName pulled from the image server. It ends its request Done carrying the
+// alias (Created on the old route). Giving up ends it Failed, carrying the alias only when the cluster has it on its
+// own architecture (RequestFailed on the old route, which reads nothing).
 type Sync struct {
 	cp          *controlplane.Client
 	clusters    cluster.Clusters
@@ -74,51 +84,74 @@ func (h *Sync) Run(ctx context.Context, leased command.Leased, logger *slog.Logg
 	if err := ensureClusterArchitecture(ctx, cl.Provider, alias, payload.OsImageName); err != nil {
 		return err
 	}
-	return sendStatus(ctx, h.cp, payload.TemplateId, statusReport{
-		Report:     reportCreated,
-		ClusterId:  leased.ClusterId,
-		ExternalId: alias,
-	})
+	if payload.RequestId == "" {
+		return sendStatus(ctx, h.cp, payload.TemplateId, statusReport{
+			Report:     reportCreated,
+			ClusterId:  leased.ClusterId,
+			ExternalId: alias,
+		})
+	}
+	return endRequest(ctx, h.cp, payload.TemplateId, leased.ClusterId, payload.RequestId, done(alias))
 }
 
 // ensureClusterArchitecture: when the image server has no VM image of the cluster's architecture, Incus pulls
 // another one without an error, and no VM can start from it (titan-ops features/catalog/design.md#template-architecture).
 // The image is deleted so the reconciler sees the alias absent instead of reporting it present.
 func ensureClusterArchitecture(ctx context.Context, p provider.Provider, alias string, osImageName string) error {
-	entry, err := p.GetImageAlias(ctx, alias)
+	image, err := readAliasImage(ctx, p, alias)
 	if err != nil {
 		return err
 	}
-	images, err := p.ListImages(ctx)
-	if err != nil {
-		return err
-	}
-	imageArchitecture := ""
-	for _, image := range images {
-		if image.Fingerprint == entry.Target {
-			imageArchitecture = image.Architecture
-		}
-	}
-	if imageArchitecture == "" {
-		return fmt.Errorf("image %s of alias %s is not in the image list", entry.Target, alias)
-	}
-	clusterArchitectures, err := p.GetServerArchitectures(ctx)
-	if err != nil {
-		return err
-	}
-	if slices.Contains(clusterArchitectures, imageArchitecture) {
+	if image.fitsTheCluster() {
 		return nil
 	}
 
 	mismatch := fmt.Sprintf("the image server has no %s VM image of %s: Incus pulled %s",
-		strings.Join(clusterArchitectures, "/"), osImageName, imageArchitecture)
-	deleteErr := p.DeleteImage(ctx, entry.Target)
+		strings.Join(image.clusterArchitectures, "/"), osImageName, image.architecture)
+	deleteErr := p.DeleteImage(ctx, image.fingerprint)
 	isAlreadyGone := provider.IsNotFound(deleteErr)
 	if deleteErr != nil && !isAlreadyGone {
 		// Retried; if every lease fails, this is the reason the give-up callback reports.
 		return fmt.Errorf("%s, and deleting it failed: %w", mismatch, deleteErr)
 	}
 	return command.Permanent(fmt.Errorf("%w: %s, so the image was deleted", errWrongArchitecture, mismatch))
+}
+
+// aliasImage is the image an alias points to, and the architectures of the cluster it is on.
+type aliasImage struct {
+	fingerprint          string
+	architecture         string
+	clusterArchitectures []string
+}
+
+func (i aliasImage) fitsTheCluster() bool {
+	return slices.Contains(i.clusterArchitectures, i.architecture)
+}
+
+// readAliasImage only reads: Run deletes what does not fit, a give-up reports it.
+func readAliasImage(ctx context.Context, p provider.Provider, alias string) (aliasImage, error) {
+	entry, err := p.GetImageAlias(ctx, alias)
+	if err != nil {
+		return aliasImage{}, err
+	}
+	images, err := p.ListImages(ctx)
+	if err != nil {
+		return aliasImage{}, err
+	}
+	image := aliasImage{fingerprint: entry.Target}
+	for _, listed := range images {
+		if listed.Fingerprint == entry.Target {
+			image.architecture = listed.Architecture
+		}
+	}
+	if image.architecture == "" {
+		return aliasImage{}, fmt.Errorf("image %s of alias %s is %w", entry.Target, alias, errImageNotListed)
+	}
+	image.clusterArchitectures, err = p.GetServerArchitectures(ctx)
+	if err != nil {
+		return aliasImage{}, err
+	}
+	return image, nil
 }
 
 // makeImage imports the distro's own image when the template names one, else pulls osImageName from the image server.
@@ -153,12 +186,50 @@ func (h *Sync) GiveUp(ctx context.Context, leased command.Leased, cause error, l
 	if payload.TemplateId == "" {
 		return command.Permanent(errors.New("template.sync payload lacks templateId: nobody to tell"))
 	}
-	return sendStatus(ctx, h.cp, payload.TemplateId, statusReport{
-		Report:    reportRequestFailed,
-		ClusterId: leased.ClusterId,
-		Reason:    giveUpReason(cause),
-		Detail:    controlplane.Detail(cause),
-	})
+	if payload.RequestId == "" {
+		return sendStatus(ctx, h.cp, payload.TemplateId, statusReport{
+			Report:    reportRequestFailed,
+			ClusterId: leased.ClusterId,
+			Reason:    giveUpReason(cause),
+			Detail:    controlplane.Detail(cause),
+		})
+	}
+	alias, err := h.usableAlias(ctx, leased.ClusterId, provider.TemplateAlias(payload.TemplateId))
+	if err != nil {
+		return err
+	}
+	// The alias is the template's id on the cluster: a Failed carrying it records the template there, as every
+	// create's give-up that finds its object does (titan-ops architecture/resource-lifecycle.md#kinds).
+	if alias != "" {
+		logger.Info("template image present; the give-up carries its alias", "alias", alias)
+	}
+	return endRequest(ctx, h.cp, payload.TemplateId, leased.ClusterId, payload.RequestId, failed(alias, cause))
+}
+
+// usableAlias is the alias when the cluster has it on its own architecture, else "". It writes nothing: an image of
+// another architecture stays for the next sync's Run to delete. Only Incus answering 404 is absent; a read that fails
+// is returned, so the next lease gives up again. A cluster the worker cannot reach for good (not configured, or its
+// connection refused by the control plane: a permanent error) answers nothing, which is no alias.
+func (h *Sync) usableAlias(ctx context.Context, clusterId string, alias string) (string, error) {
+	cl, err := h.clusters.Cluster(ctx, clusterId)
+	if err != nil {
+		if !command.IsRetryable(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	image, err := readAliasImage(ctx, cl.Provider, alias)
+	isAbsent := provider.IsNotFound(err) || errors.Is(err, errImageNotListed)
+	if isAbsent {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !image.fitsTheCluster() {
+		return "", nil
+	}
+	return alias, nil
 }
 
 func giveUpReason(cause error) string {

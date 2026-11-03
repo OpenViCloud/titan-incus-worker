@@ -274,9 +274,9 @@ func TestReconcile_ReportsAnAliasGoneWithTheCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := onlyBody(t, cp)
-	if body["report"] != "Observed" || body["exists"] != false || body["clusterId"] != "mock" {
-		t.Fatalf("report: %v", body)
+	body := onlyBodyAt(t, cp, observationRoute)
+	if body["exists"] != false || len(body) != 1 {
+		t.Fatalf("observation: %v", body)
 	}
 	sent := logs.One("reconcile report sent")
 	if sent["templateId"] != templateId || sent["recordedExistence"] != "Exists" || sent["exists"] != false {

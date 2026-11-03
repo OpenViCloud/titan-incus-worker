@@ -23,7 +23,8 @@ type ReconcilableTemplate struct {
 	CurrentExistence   string `json:"currentExistence"`
 }
 
-// Reconcile observes one cluster's template aliases and reports what differs; it never acts on Incus.
+// Reconcile observes one cluster's template aliases and reports what differs on their observation route; it never acts
+// on Incus and never ends a request.
 func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error {
 	var rows []ReconcilableTemplate
 	if err := cp.GetJSON(ctx, "/internal/reconcile/templates?clusterId="+url.QueryEscape(clusterId), &rows); err != nil {
@@ -46,7 +47,7 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 		if !shouldReport {
 			continue
 		}
-		err := sendStatus(ctx, cp, row.Id, statusReport{Report: reportObserved, ClusterId: clusterId, Exists: &exists})
+		err := sendObservation(ctx, cp, row.Id, clusterId, ObservationBody{Exists: exists})
 		if err != nil {
 			logger.Warn("template report failed; next cycle sends it again", "templateId", row.Id, "exists", exists, "error", err)
 			continue

@@ -113,12 +113,15 @@ type Provider struct {
 	ImportedImages         []ImportedImage
 	ImportImageErr         error
 	ListImageAliasesErr    error
+	GetImageAliasErr       error
+	ListImagesErr          error
 	// An alias's image has fingerprint "fp-" + alias; its architecture is ImageArchitectures[fingerprint], or
 	// x86_64 when unset.
-	ImageArchitectures  map[string]string
-	ServerArchitectures []string
-	DeletedImages       []string
-	DeleteImageErr      error
+	ImageArchitectures        map[string]string
+	ServerArchitectures       []string
+	GetServerArchitecturesErr error
+	DeletedImages             []string
+	DeleteImageErr            error
 	// BackupOrder names each step a backup takes, in call order, e.g. "snapshot p/vm/backup".
 	BackupOrder     []string
 	InstanceBackups []InstanceBackup
@@ -420,6 +423,9 @@ func (p *Provider) ListNetworkACLsAllProjects(ctx context.Context) ([]api.Networ
 
 func (p *Provider) GetImageAlias(ctx context.Context, name string) (*api.ImageAliasesEntry, error) {
 	p.count()
+	if p.GetImageAliasErr != nil {
+		return nil, p.GetImageAliasErr
+	}
 	if !p.Aliases[name] {
 		return nil, NotFound("Image alias not found")
 	}
@@ -503,6 +509,9 @@ func readMetadataYaml(metadata io.Reader) (string, error) {
 
 func (p *Provider) ListImages(ctx context.Context) ([]api.Image, error) {
 	p.count()
+	if p.ListImagesErr != nil {
+		return nil, p.ListImagesErr
+	}
 	images := []api.Image{}
 	for alias := range p.Aliases {
 		fingerprint := "fp-" + alias
@@ -517,7 +526,7 @@ func (p *Provider) ListImages(ctx context.Context) ([]api.Image, error) {
 
 func (p *Provider) GetServerArchitectures(ctx context.Context) ([]string, error) {
 	p.count()
-	return p.ServerArchitectures, nil
+	return p.ServerArchitectures, p.GetServerArchitecturesErr
 }
 
 func (p *Provider) DeleteImage(ctx context.Context, fingerprint string) error {
