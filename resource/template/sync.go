@@ -208,8 +208,9 @@ func (h *Sync) GiveUp(ctx context.Context, leased command.Leased, cause error, l
 
 // usableAlias is the alias when the cluster has it on its own architecture, else "". It writes nothing: an image of
 // another architecture stays for the next sync's Run to delete. Absent is Incus answering 404, or an alias whose
-// image the image list does not show; any other read that fails is returned, so the next lease gives up again. A cluster the worker cannot reach for good (not configured, or its
-// connection refused by the control plane: a permanent error) answers nothing, which is no alias.
+// image the image list does not show; any other read that fails is returned, so the next lease gives up again. A
+// cluster the worker cannot reach for good (not configured, or its connection refused by the control plane: a
+// permanent error) answers nothing, which is no alias.
 func (h *Sync) usableAlias(ctx context.Context, clusterId string, alias string) (string, error) {
 	cl, err := h.clusters.Cluster(ctx, clusterId)
 	if err != nil {

@@ -281,8 +281,8 @@ func TestReconcile_ReportsAnAliasGoneWithTheCluster(t *testing.T) {
 	}
 }
 
-// The image-already-there branch is the one a lease after a lost report takes; without a line the log shows a lease
-// that did nothing.
+// The image-already-there branch is taken, for example, by a lease after a lost report; without a line the log shows
+// a lease that did nothing.
 func TestSync_AliasPresent_SaysSo_InTheLog(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
