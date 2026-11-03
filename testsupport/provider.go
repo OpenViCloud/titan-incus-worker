@@ -90,6 +90,7 @@ type Provider struct {
 	// Copies holds each instance a copy made, with its devices, as it was when made.
 	Copies            []api.Instance
 	CreateSnapshotErr error
+	GetSnapshotErr    error
 	DeleteSnapshotErr error
 	Volumes           map[string]*api.StorageVolume // key: project + "/" + name
 	GetVolumeErr      error
@@ -568,6 +569,9 @@ func (p *Provider) CreateInstanceSnapshot(ctx context.Context, project string, i
 
 func (p *Provider) GetInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) (*api.InstanceSnapshot, error) {
 	p.count()
+	if p.GetSnapshotErr != nil {
+		return nil, p.GetSnapshotErr
+	}
 	key := project + "/" + instance + "/" + snapshot
 	if !p.InstanceSnapshots[key] {
 		return nil, NotFound("Instance_snapshot not found")

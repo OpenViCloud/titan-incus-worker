@@ -26,9 +26,10 @@ const (
 	existenceNotFound = "NotFound"
 )
 
-// Reconcile observes one cluster's VM snapshots and reports what differs; it never acts on Incus, and it never reports
-// Deleted: a snapshot gone is NotFound (titan-ops architecture/desired-and-current.md#existence-axis). The all-projects
-// instance list (recursion=2) carries each instance's snapshots (lab-storage 05), so one read covers them all.
+// Reconcile observes one cluster's VM snapshots and reports what differs on their observation route; it never acts on
+// Incus, never ends a request, and never reports Deleted: a snapshot gone is NotFound
+// (titan-ops architecture/desired-and-current.md#existence-axis). The all-projects instance list (recursion=2) carries
+// each instance's snapshots (lab-storage 05), so one read covers them all.
 func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error {
 	var rows []ReconcilableVmSnapshot
 	if err := cp.GetJSON(ctx, "/internal/reconcile/vm-snapshots?clusterId="+url.QueryEscape(clusterId), &rows); err != nil {
@@ -48,13 +49,13 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 		if !shouldReport {
 			continue
 		}
-		err := sendStatus(ctx, cp, row.VmId, row.Id, report)
+		err := sendObservation(ctx, cp, row.VmId, row.Id, report)
 		if err != nil {
 			logger.Warn("VM snapshot report failed; next cycle sends it again", "snapshotId", row.Id, "error", err)
 			continue
 		}
 		logger.Info("reconcile report sent", "snapshotId", row.Id, "vmId", row.VmId,
-			"recordedExistence", row.CurrentExistence, "exists", *report.Exists)
+			"recordedExistence", row.CurrentExistence, "exists", report.Exists)
 	}
 	return nil
 }
@@ -72,20 +73,19 @@ func SnapshotsByInstance(instances []api.InstanceFull) map[string]map[string]boo
 	return byInstance
 }
 
-// DecideReport: seeing a snapshot only says it exists, so it can never end a revert that has not happened. A VM gone
-// says nothing: its delete settles its snapshots. A snapshot gone from a VM still there is NotFound unless already
-// recorded.
-func DecideReport(row ReconcilableVmSnapshot, snapshotsByInstance map[string]map[string]bool) (statusReport, bool) {
+// DecideReport: seeing a snapshot only says it exists, so it ends no request. A VM gone says nothing: its delete settles
+// its snapshots. A snapshot gone from a VM still there is NotFound unless already recorded.
+func DecideReport(row ReconcilableVmSnapshot, snapshotsByInstance map[string]map[string]bool) (ObservationBody, bool) {
 	instance, snapshot, err := provider.SplitSnapshotId(row.ExternalId)
 	if err != nil {
-		return statusReport{}, false
+		return ObservationBody{}, false
 	}
 	snapshots, instancePresent := snapshotsByInstance[instance]
 	if !instancePresent {
-		return statusReport{}, false
+		return ObservationBody{}, false
 	}
 	if snapshots[snapshot] {
-		return observed(true), row.CurrentExistence != existenceExists
+		return ObservationBody{Exists: true}, row.CurrentExistence != existenceExists
 	}
-	return observed(false), row.CurrentExistence != existenceNotFound
+	return ObservationBody{Exists: false}, row.CurrentExistence != existenceNotFound
 }
