@@ -95,7 +95,8 @@ func reportWhatIncusShows(ctx context.Context, cp *controlplane.Client, p provid
 // giveUp is the attach's and the detach's. With a request id: Incus showing what was asked (reached) makes the report the
 // request's Done — the work happened, only its report was lost. That is an exception to every give-up sending Failed
 // (titan-ops architecture/resource-lifecycle.md#callback-routes), kept from the volume's rule that a give-up showing the
-// attach done is the attach done (titan-ops features/volume/design.md#volume-reports); otherwise Failed, with the instances using the volume when it can be read, alone when it cannot or the volume is gone.
+// attach or detach done is that request done (titan-ops features/volume/design.md#volume-reports); otherwise Failed,
+// with the instances using the volume when it can be read, alone when it cannot or the volume is gone.
 // Without one, the old route: the request failed, plus what Incus shows when it can be read — the volume gone, or the
 // instances using it.
 func giveUp(ctx context.Context, cp *controlplane.Client, clusters cluster.Clusters, leased command.Leased, cause error,

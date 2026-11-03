@@ -56,11 +56,11 @@ type observedVolume struct {
 // (titan-ops architecture/resource-lifecycle.md#reconciler). A restart forgets, and each such volume is sent once more.
 type Reconciler struct {
 	mu            sync.Mutex
-	sentElsewhere map[string]string
+	sentInUse map[string]string
 }
 
 func NewReconciler() *Reconciler {
-	return &Reconciler{sentElsewhere: map[string]string{}}
+	return &Reconciler{sentInUse: map[string]string{}}
 }
 
 // Reconcile observes one cluster's volumes and volume snapshots and reports what differs on their observation routes;
@@ -139,7 +139,7 @@ func (r *Reconciler) sentAlready(row ReconcilableVolume, report StatusReport) bo
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	sent, known := r.sentElsewhere[row.Id]
+	sent, known := r.sentInUse[row.Id]
 	return known && sent == instanceSet(report.AttachedTo)
 }
 
@@ -149,10 +149,10 @@ func (r *Reconciler) remember(row ReconcilableVolume, report StatusReport) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !*report.Exists || len(report.AttachedTo) == 0 {
-		delete(r.sentElsewhere, row.Id)
+		delete(r.sentInUse, row.Id)
 		return
 	}
-	r.sentElsewhere[row.Id] = instanceSet(report.AttachedTo)
+	r.sentInUse[row.Id] = instanceSet(report.AttachedTo)
 }
 
 func instanceSet(names []string) string {
