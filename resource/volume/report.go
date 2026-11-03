@@ -30,11 +30,10 @@ const (
 )
 
 // StatusReport is the body of the old PATCH /internal/volumes/{volumeId}/status and of its snapshots' callback, and the
-// decision DecideVolumeReport and DecideSnapshotReport return, whose Exists (and, for a volume, AttachedTo) the reconciler
-// sends on the observation routes. Exists is a pointer so an observation always says true or false, and the other
-// reports leave it out. AttachedTo is the names of
-// the instances in the volume's used_by, as Incus lists them: which are Titan VMs is the control plane's to say
-// (titan-ops features/volume/design.md#attachment-from-used-by).
+// decision DecideVolumeReport and DecideSnapshotReport return, whose Exists (and, for a volume, AttachedTo) the
+// reconciler sends on the observation routes. Exists is a pointer so an observation always says true or false, and the
+// other reports leave it out. AttachedTo is the names of the instances in the volume's used_by, as Incus lists them:
+// which are Titan VMs is the control plane's to say (titan-ops features/volume/design.md#attachment-from-used-by).
 type StatusReport struct {
 	Report     string   `json:"report"`
 	Exists     *bool    `json:"exists,omitempty"`
