@@ -109,9 +109,9 @@ func (h *Delete) aclRemoved(ctx context.Context, clusterId string, payload delet
 }
 
 // networkIsGone reads the network: only Incus answering 404 is gone. A read that fails is returned, so the next lease
-// gives up again instead of guessing: a read fails only while Incus cannot answer, which passes, unlike a delete,
-// which Incus may refuse while it answers. A payload or cluster that cannot be read from at all tells nothing, which
-// is not gone.
+// gives up again instead of guessing: a read is refused only for what hits the whole cluster (an outage, a trust that
+// lapsed), which an operator mends, never for the network's own state, unlike a delete, which Incus refuses for the
+// object's state ("in use"). A payload or cluster that cannot be read from at all tells nothing, which is not gone.
 func (h *Delete) networkIsGone(ctx context.Context, clusterId string, payload deletePayload) (bool, error) {
 	canRead := payload.ExternalNetworkId != "" && payload.ProjectName != ""
 	if !canRead {

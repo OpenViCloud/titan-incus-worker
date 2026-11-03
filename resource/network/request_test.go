@@ -290,13 +290,13 @@ func TestDelete_WithARequest_GiveUp_NetworkGoneButItsAclDeleteFails_IsFailed(t *
 	p := testsupport.NewProvider()
 	p.DeleteACLErr = errors.New("acl in use")
 
-	err := giveUpCommand(newDelete(cp, p), withRequest(deleteLeased()), errors.New("acl in use"))
+	err := giveUpCommand(newDelete(cp, p), withRequest(deleteLeased()), errors.New("delete kept failing"))
 
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := requestEnd(t, cp)
-	if body["outcome"] != "Failed" || body["reason"] != reasonDeleteFailed || body["detail"] != "acl in use" {
+	if body["outcome"] != "Failed" || body["reason"] != reasonDeleteFailed || body["detail"] != "delete kept failing" {
 		t.Errorf("report %v", body)
 	}
 }
