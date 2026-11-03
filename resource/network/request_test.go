@@ -284,25 +284,11 @@ func TestDelete_WithARequest_GiveUp_NetworkGone_DeletesItsAcl_AndIsDone(t *testi
 	}
 }
 
-func TestDelete_WithARequest_GiveUp_AclDeleteMayPass_IsRetryable_AndReportsNothing(t *testing.T) {
+// The Incus adapter calls every error transient, a refusal included: the give-up does not wait for one to pass.
+func TestDelete_WithARequest_GiveUp_NetworkGoneButItsAclDeleteFails_IsFailed(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
-	p.DeleteACLErr = errors.New("incus unreachable")
-
-	err := giveUpCommand(newDelete(cp, p), withRequest(deleteLeased()), errors.New("incus unreachable"))
-
-	if err == nil || !command.IsRetryable(err) {
-		t.Fatalf("want retryable, got %v", err)
-	}
-	if len(cp.Requests()) != 0 {
-		t.Fatalf("reported %v", cp.Requests())
-	}
-}
-
-func TestDelete_WithARequest_GiveUp_NetworkGoneButIncusRefusesItsAcl_IsFailed(t *testing.T) {
-	cp := testsupport.NewControlPlane(t)
-	p := testsupport.NewProvider()
-	p.DeleteACLErr = command.Permanent(errors.New("acl in use"))
+	p.DeleteACLErr = errors.New("acl in use")
 
 	err := giveUpCommand(newDelete(cp, p), withRequest(deleteLeased()), errors.New("acl in use"))
 

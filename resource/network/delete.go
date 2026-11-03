@@ -88,40 +88,24 @@ func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	}
 	// The network is gone: its report never arrived, or Run kept failing on the ACL it deletes second. The give-up
 	// removes the ACL once more; with both gone, giving the network back would leave the tenant one Incus does not
-	// have, so the request is Done. An ACL Incus refuses to delete ends it Failed, and the tenant's next delete tries it
-	// again; an error that may pass is returned, so the next lease gives up again.
-	if gone {
-		removed, err := h.aclRemoved(ctx, leased.ClusterId, payload)
-		if err != nil {
-			return err
-		}
-		if removed {
-			logger.Info("already gone; the give-up ends the request done", "object", payload.ExternalNetworkId)
-			return endRequest(ctx, h.cp, payload.NetworkId, payload.RequestId, done("", nil))
-		}
+	// have, so the request is Done. Any other answer about the ACL ends it Failed: the Incus adapter calls every error
+	// transient, so waiting for one to pass could last for ever, and the tenant's next delete tries the ACL again.
+	if gone && h.aclRemoved(ctx, leased.ClusterId, payload) {
+		logger.Info("already gone; the give-up ends the request done", "object", payload.ExternalNetworkId)
+		return endRequest(ctx, h.cp, payload.NetworkId, payload.RequestId, done("", nil))
 	}
 	end := failed("", nil, reasonDeleteFailed, cause)
 	return endRequest(ctx, h.cp, payload.NetworkId, payload.RequestId, end)
 }
 
-// aclRemoved deletes the network's ACL: true when Incus has it no longer, false when Incus refuses for good. An error
-// that may pass is returned, like networkIsGone's.
-func (h *Delete) aclRemoved(ctx context.Context, clusterId string, payload deletePayload) (bool, error) {
+// aclRemoved deletes the network's ACL: true only when Incus has it no longer.
+func (h *Delete) aclRemoved(ctx context.Context, clusterId string, payload deletePayload) bool {
 	cl, err := h.clusters.Cluster(ctx, clusterId)
 	if err != nil {
-		if !command.IsRetryable(err) {
-			return false, nil
-		}
-		return false, err
+		return false
 	}
 	err = cl.Provider.DeleteNetworkACL(ctx, payload.ProjectName, provider.NetworkAclName(payload.NetworkId))
-	if err == nil || provider.IsNotFound(err) {
-		return true, nil
-	}
-	if command.IsRetryable(err) {
-		return false, err
-	}
-	return false, nil
+	return err == nil || provider.IsNotFound(err)
 }
 
 // networkIsGone reads the network: only Incus answering 404 is gone. A read that fails is returned, so the next lease
