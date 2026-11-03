@@ -25,9 +25,8 @@ type deletePayload struct {
 // Delete runs load-balancer.delete: the VIP leaves its network; one already gone is done. It ends its request Done
 // (Deleted on the old route; only this command reports it,
 // titan-ops architecture/desired-and-current.md#forget-on-provider-confirm). Giving up ends it Failed, which gives the
-// load balancer back
-// (titan-ops architecture/desired-and-current.md#abandoned-request), unless Incus no longer has the VIP (RequestFailed
-// on the old route, which reads nothing).
+// load balancer back (titan-ops architecture/desired-and-current.md#abandoned-request), unless Incus no longer has
+// the VIP (RequestFailed on the old route, which reads nothing).
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
