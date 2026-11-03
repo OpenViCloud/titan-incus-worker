@@ -55,7 +55,7 @@ type observedVolume struct {
 // that something outside Titan uses it, not which instances, so without this the volume would be sent every cycle
 // (titan-ops architecture/resource-lifecycle.md#reconciler). A restart forgets, and each such volume is sent once more.
 type Reconciler struct {
-	mu            sync.Mutex
+	mu        sync.Mutex
 	sentInUse map[string]string
 }
 
