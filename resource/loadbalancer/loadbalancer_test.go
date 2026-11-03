@@ -16,6 +16,9 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
+// The commands here carry no requestId, so they report on the old route; request_test.go has the ones that do. The
+// reconciler tests here report on the observation route.
+
 const (
 	loadBalancerId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	intentId       = "11111111-2222-3333-4444-555555555555"
@@ -80,8 +83,18 @@ func clusters(p *testsupport.Provider) cluster.Fixed {
 
 func reports(t *testing.T, cp *testsupport.ControlPlane, id string) []map[string]any {
 	t.Helper()
+	return bodiesTo(t, cp, "PATCH /internal/load-balancers/"+id+"/status")
+}
+
+func observations(t *testing.T, cp *testsupport.ControlPlane, id string) []map[string]any {
+	t.Helper()
+	return bodiesTo(t, cp, "PATCH /internal/load-balancers/"+id+"/observation")
+}
+
+func bodiesTo(t *testing.T, cp *testsupport.ControlPlane, route string) []map[string]any {
+	t.Helper()
 	bodies := []map[string]any{}
-	for _, request := range cp.RequestsTo("PATCH /internal/load-balancers/" + id + "/status") {
+	for _, request := range cp.RequestsTo(route) {
 		var body map[string]any
 		if err := json.Unmarshal([]byte(request.Body), &body); err != nil {
 			t.Fatal(err)
@@ -404,12 +417,15 @@ func TestReconcile_ReportsOnlyWhatDiffers_AbsentIsNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(reports(t, cp, kept)) != 0 {
+	if len(cp.Requests()) != 1+3 {
+		t.Fatalf("want the list and three observations, got %+v", cp.Requests())
+	}
+	if len(observations(t, cp, kept)) != 0 {
 		t.Fatal("unchanged: no report")
 	}
 	for id, want := range map[string]bool{vanished: false, back: true, orphaned: false} {
-		got := reports(t, cp, id)
-		if len(got) != 1 || got[0]["report"] != "Observed" || got[0]["exists"] != want {
+		got := observations(t, cp, id)
+		if len(got) != 1 || got[0]["exists"] != want {
 			t.Fatalf("%s: got %v, want exists=%v", id, got, want)
 		}
 	}
@@ -427,7 +443,7 @@ func TestReconcile_AFailedListOfOneNetwork_ReportsNothingForIt(t *testing.T) {
 	if err := Reconcile(context.Background(), cp.Client(), p, clusterId, discard); err != nil {
 		t.Fatal(err)
 	}
-	if len(reports(t, cp, loadBalancerId)) != 0 {
+	if len(observations(t, cp, loadBalancerId)) != 0 {
 		t.Fatalf("requests %+v", cp.Requests())
 	}
 }

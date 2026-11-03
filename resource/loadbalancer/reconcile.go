@@ -26,10 +26,10 @@ type ReconcilableLoadBalancer struct {
 	CurrentExistence  string `json:"currentExistence"`
 }
 
-// Reconcile observes one cluster's load balancers — one read per network — and reports what differs; it never acts on
-// Incus. A network Incus no longer has holds none. A failed read of a network skips that network this cycle: reading
-// it as "none" would report every one of them gone. Absent is NotFound, never Deleted
-// (titan-ops architecture/desired-and-current.md#existence-axis).
+// Reconcile observes one cluster's load balancers — one read per network — and reports what differs on their
+// observation route; it never acts on Incus and never ends a request. A network Incus no longer has holds none. A
+// failed read of a network skips that network this cycle: reading it as "none" would report every one of them gone.
+// Absent is NotFound, never Deleted (titan-ops architecture/desired-and-current.md#existence-axis).
 func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error {
 	var rows []ReconcilableLoadBalancer
 	if err := cp.GetJSON(ctx, "/internal/reconcile/load-balancers?clusterId="+url.QueryEscape(clusterId), &rows); err != nil {
@@ -72,7 +72,7 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 		if alreadyRecorded {
 			continue
 		}
-		if err := sendStatus(ctx, cp, row.Id, statusReport{Report: reportObserved, Exists: &exists}); err != nil {
+		if err := sendObservation(ctx, cp, row.Id, ObservationBody{Exists: exists}); err != nil {
 			logger.Warn("load balancer report failed; next cycle sends it again", "loadBalancerId", row.Id, "error", err)
 			continue
 		}
