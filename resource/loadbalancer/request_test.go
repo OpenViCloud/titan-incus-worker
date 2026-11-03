@@ -129,7 +129,7 @@ func TestRun_WithARequest_EndsItDone_OnTheRequestRoute(t *testing.T) {
 	}
 }
 
-func TestRun_WithARequest_WritesIncusFirst(t *testing.T) {
+func TestRun_WithARequest_WritesIncus(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withVms()
 
@@ -152,15 +152,18 @@ func TestRun_WithARequest_WritesIncusFirst(t *testing.T) {
 
 func TestRun_WithARequest_AFailedWrite_ReportsNothing(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
+	fresh := withVms()
+	fresh.CreateLoadBalancerErr = api.StatusErrorf(http.StatusInternalServerError, "busy")
 	p := withVip(withVms())
 	p.UpdateLoadBalancerErr = api.StatusErrorf(http.StatusInternalServerError, "busy")
 	p.DeleteLoadBalancerErr = api.StatusErrorf(http.StatusInternalServerError, "busy")
 
+	createErr := runCommand(NewCreate(cp.Client(), clusters(fresh)), withRequest(createLeased()))
 	updateErr := runCommand(NewUpdate(cp.Client(), clusters(p)), withRequest(updateLeased()))
 	deleteErr := runCommand(NewDelete(cp.Client(), clusters(p)), withRequest(deleteLeased()))
 
-	if updateErr == nil || deleteErr == nil || len(cp.Requests()) != 0 {
-		t.Fatalf("update %v, delete %v, requests %+v", updateErr, deleteErr, cp.Requests())
+	if createErr == nil || updateErr == nil || deleteErr == nil || len(cp.Requests()) != 0 {
+		t.Fatalf("create %v, update %v, delete %v, requests %+v", createErr, updateErr, deleteErr, cp.Requests())
 	}
 }
 

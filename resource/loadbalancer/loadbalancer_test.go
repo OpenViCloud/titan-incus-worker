@@ -16,7 +16,8 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
-// The commands here carry no requestId, so they report on the old route; request_test.go has the ones that do.
+// The commands here carry no requestId, so they report on the old route; request_test.go has the ones that do. The
+// reconciler tests here report on the observation route.
 
 const (
 	loadBalancerId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"

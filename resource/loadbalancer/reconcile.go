@@ -27,8 +27,8 @@ type ReconcilableLoadBalancer struct {
 }
 
 // Reconcile observes one cluster's load balancers — one read per network — and reports what differs on their
-// observation route; it never acts on Incus and never ends a request. A network Incus no longer has holds none. A failed read of a network skips that network this cycle: reading
-// it as "none" would report every one of them gone. Absent is NotFound, never Deleted
+// observation route; it never acts on Incus and never ends a request. A network Incus no longer has holds none. A
+// failed read of a network skips that network this cycle: reading it as "none" would report every one of them gone. Absent is NotFound, never Deleted
 // (titan-ops architecture/desired-and-current.md#existence-axis).
 func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error {
 	var rows []ReconcilableLoadBalancer
