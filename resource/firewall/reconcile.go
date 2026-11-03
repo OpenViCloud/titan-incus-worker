@@ -28,8 +28,9 @@ type ReconcilableRule struct {
 	CurrentExistence string  `json:"currentExistence"`
 }
 
-// Reconcile observes one cluster's firewall rules — every ACL of every project in one read — and reports what differs;
-// it never acts on Incus. A failed read skips the cycle: reading it as "no rule" would report every rule gone.
+// Reconcile observes one cluster's firewall rules — every ACL of every project in one read — and reports what differs
+// on their observation route; it never acts on Incus and never ends a request. A failed read skips the cycle: reading
+// it as "no rule" would report every rule gone.
 func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error {
 	var rows []ReconcilableRule
 	if err := cp.GetJSON(ctx, "/internal/reconcile/firewall-rules?clusterId="+url.QueryEscape(clusterId), &rows); err != nil {
@@ -56,9 +57,13 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 		if !shouldReport {
 			continue
 		}
-		err := sendStatus(ctx, cp, row.NetworkId, row.Id, report)
+		state := ""
+		if report.Observed != nil {
+			state = report.Observed.State
+		}
+		err := sendObservation(ctx, cp, row.NetworkId, row.Id, report)
 		if err != nil {
-			logger.Warn("firewall rule report failed; next cycle sends it again", "ruleId", row.Id, "state", report.State, "error", err)
+			logger.Warn("firewall rule report failed; next cycle sends it again", "ruleId", row.Id, "state", state, "error", err)
 			continue
 		}
 		recordedState := ""
@@ -66,7 +71,7 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 			recordedState = *row.CurrentState
 		}
 		logger.Info("reconcile report sent", "ruleId", row.Id, "networkId", row.NetworkId, "recordedState", recordedState,
-			"recordedExistence", row.CurrentExistence, "exists", *report.Exists, "state", report.State)
+			"recordedExistence", row.CurrentExistence, "exists", report.Exists, "state", state)
 	}
 	return nil
 }
@@ -74,20 +79,18 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 // DecideReport compares one rule with its ACL: a report when its state or its existence differs from what Titan
 // recorded. The state goes as Incus spells it. Absent is NotFound, never Deleted: only a delete command reports that
 // (titan-ops architecture/desired-and-current.md#existence-axis).
-func DecideReport(row ReconcilableRule, stateById map[string]string) (statusReport, bool) {
+func DecideReport(row ReconcilableRule, stateById map[string]string) (ObservationBody, bool) {
 	state, present := stateById[row.ExternalId]
 	if !present {
-		absent := false
 		alreadyRecorded := row.CurrentExistence == existenceNotFound
-		return statusReport{Report: reportObserved, Exists: &absent}, !alreadyRecorded
+		return ObservationBody{Exists: false}, !alreadyRecorded
 	}
 
-	exists := true
 	recordedState := ""
 	if row.CurrentState != nil {
 		recordedState = *row.CurrentState
 	}
 	existenceChanged := row.CurrentExistence != existenceExists
 	stateChanged := state != recordedState
-	return statusReport{Report: reportObserved, Exists: &exists, State: state}, existenceChanged || stateChanged
+	return ObservationBody{Exists: true, Observed: &Observation{State: state}}, existenceChanged || stateChanged
 }

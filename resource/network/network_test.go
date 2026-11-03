@@ -300,6 +300,7 @@ func TestCreate_GiveUp_CannotListNetworks_IsRetryable_AndTellsNothing(t *testing
 func TestCreate_WithPublicIpv6_NetworkReadFails_IsRetryable(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
+	p.GetNetworkErr = errors.New("incus unreachable")
 
 	err := NewCreate(cp.Client(), ovnUplinkCluster(p, "ovnup")).Run(context.Background(), createLeasedWithIpv6("10.40.0.0/24", ipv6Subnet, ipv6Router), testsupport.DiscardLogger())
 
@@ -674,7 +675,12 @@ func TestDecideReport(t *testing.T) {
 		if !send {
 			continue
 		}
-		if got.Report != reportObserved || got.Exists == nil || *got.Exists != c.wantExists || got.Status != c.wantStatus {
+		gotStatus := ""
+		if got.Observed != nil {
+			gotStatus = got.Observed.Status
+		}
+		hasObservation := got.Observed != nil
+		if got.Exists != c.wantExists || hasObservation != c.wantExists || gotStatus != c.wantStatus {
 			t.Errorf("%s: want exists %v status %q, got %+v", c.name, c.wantExists, c.wantStatus, got)
 		}
 	}
@@ -693,8 +699,8 @@ func TestReconcile_SendsTheIncusStatusAsIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := onlyBody(t, cp)
-	if body["report"] != "Observed" || body["exists"] != true || body["status"] != "Created" {
+	body := observationBody(t, cp)
+	if observed, _ := body["observed"].(map[string]any); body["exists"] != true || observed["status"] != "Created" {
 		t.Fatalf("report: %v", body)
 	}
 	sent := logs.One("reconcile report sent")
@@ -714,12 +720,12 @@ func TestReconcile_NetworkGone_IsNotFound_NeverDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := onlyBody(t, cp)
-	if body["report"] != "Observed" || body["exists"] != false {
+	body := observationBody(t, cp)
+	if body["exists"] != false {
 		t.Fatalf("report: %v", body)
 	}
-	if _, hasStatus := body["status"]; hasStatus {
-		t.Fatalf("an absent network has no status: %v", body)
+	if _, hasObservation := body["observed"]; hasObservation {
+		t.Fatalf("an absent network has no observation: %v", body)
 	}
 }
 
@@ -735,8 +741,7 @@ func TestReconcile_NetworkReadFails_ReportsNothing(t *testing.T) {
 	if err == nil {
 		t.Fatal("want the read error")
 	}
-	reports := cp.RequestsTo("PATCH /internal/networks/" + networkId + "/status")
-	if len(reports) != 0 {
-		t.Fatalf("reported on a failed read: %+v", reports)
+	if len(cp.RequestsTo("PATCH ")) != 0 {
+		t.Fatalf("reported on a failed read: %+v", cp.Requests())
 	}
 }
