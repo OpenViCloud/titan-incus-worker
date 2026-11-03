@@ -69,7 +69,7 @@ func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error,
 }
 
 // snapshotIsGone is true only when Incus answers 404, which a VM gone along with its snapshots answers too. A payload
-// without what the read needs, or a cluster the worker is not configured for, tells nothing, which is not gone.
+// without what the read needs, or a cluster the worker cannot reach for good, tells nothing, which is not gone.
 func (h *Delete) snapshotIsGone(ctx context.Context, clusterId string, payload snapshotPayload) (bool, error) {
 	instance, snapshot, err := provider.SplitSnapshotId(payload.ExternalSnapshotId)
 	if err != nil || payload.ProjectName == "" {

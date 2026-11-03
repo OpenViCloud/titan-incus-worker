@@ -236,7 +236,7 @@ func TestDelete_WithARequest_GiveUp_IsDone_WhenIncusNoLongerHasTheSnapshot_ElseF
 }
 
 // A cluster the worker is not configured for says nothing about the snapshot: not gone, so the delete gives it back.
-func TestDelete_WithARequest_GiveUp_OnAClusterItCannotRead_IsFailed(t *testing.T) {
+func TestDelete_WithARequest_GiveUp_OnAClusterTheWorkerIsNotConfiguredFor_IsFailed(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
 	err := giveUpCommand(NewDelete(cp.Client(), cluster.Fixed{}), withRequest(snapshotLeased("vm-snapshot.delete")), errors.New("in use"))

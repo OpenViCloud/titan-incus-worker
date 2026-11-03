@@ -119,8 +119,8 @@ func decodeSnapshot(leased command.Leased) (snapshotPayload, string, string, err
 }
 
 // snapshotExists reads the snapshot: only Incus answering 404 is absent. A read that fails is returned, so the next
-// lease gives up again instead of guessing. A cluster the worker is not configured for (a permanent error) answers
-// nothing: known is false with no error.
+// lease gives up again instead of guessing. A cluster the worker cannot reach for good (not configured, or its
+// connection refused by the control plane: a permanent error) answers nothing: known is false with no error.
 func snapshotExists(ctx context.Context, clusters cluster.Clusters, clusterId string, project string, instance string,
 	snapshot string) (exists bool, known bool, err error) {
 	cl, err := clusters.Cluster(ctx, clusterId)

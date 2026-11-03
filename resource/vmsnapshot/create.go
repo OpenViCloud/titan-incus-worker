@@ -90,7 +90,7 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 }
 
 // existingSnapshot returns the snapshot's provider id when Incus has it, "" when it does not, when the payload lacks what
-// the read needs, or when the worker is not configured for the cluster; a read that fails is the error. The old route
+// the read needs, or when the worker cannot reach the cluster for good; a read that fails is the error. The old route
 // reads the error as no snapshot.
 func (h *Create) existingSnapshot(ctx context.Context, clusterId string, payload createPayload) (string, error) {
 	name, err := provider.SnapshotName(payload.SnapshotId)

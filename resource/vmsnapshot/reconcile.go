@@ -73,9 +73,8 @@ func SnapshotsByInstance(instances []api.InstanceFull) map[string]map[string]boo
 	return byInstance
 }
 
-// DecideReport: seeing a snapshot only says it exists, so it ends no request. A VM gone
-// says nothing: its delete settles its snapshots. A snapshot gone from a VM still there is NotFound unless already
-// recorded.
+// DecideReport: seeing a snapshot only says it exists, so it ends no request. A VM gone says nothing: its delete settles
+// its snapshots. A snapshot gone from a VM still there is NotFound unless already recorded.
 func DecideReport(row ReconcilableVmSnapshot, snapshotsByInstance map[string]map[string]bool) (ObservationBody, bool) {
 	instance, snapshot, err := provider.SplitSnapshotId(row.ExternalId)
 	if err != nil {
