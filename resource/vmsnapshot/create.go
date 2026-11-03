@@ -13,15 +13,19 @@ import (
 
 // createPayload mirrors ProviderCommandQueue.EnqueueVmSnapshotCreateAsync. name is the tenant's; Incus gets Titan's.
 type createPayload struct {
-	SnapshotId   string `json:"snapshotId"`
+	SnapshotId string `json:"snapshotId"`
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
+	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
+	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	RequestId    string `json:"requestId"`
 	VmId         string `json:"vmId"`
 	ExternalVmId string `json:"externalVmId"`
 	Name         string `json:"name"`
 	ProjectName  string `json:"projectName"`
 }
 
-// Create runs vm-snapshot.create. Incus has made it once the operation returns, so it reports Created with the
-// provider id "<instance>/<snapshot>": the create is done.
+// Create runs vm-snapshot.create. Incus has made it once the operation returns, so the create is done: it ends the
+// request Done with the provider id "<instance>/<snapshot>" (Created on the old route).
 type Create struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -58,34 +62,43 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if isOurs {
 		logger.Info("already exists; treating it as ours", "object", externalId)
 	}
-	report := statusReport{Report: reportCreated, ExternalId: externalId}
-	return sendStatus(ctx, h.cp, payload.VmId, payload.SnapshotId, report)
+	if payload.RequestId == "" {
+		report := statusReport{Report: reportCreated, ExternalId: externalId}
+		return sendStatus(ctx, h.cp, payload.VmId, payload.SnapshotId, report)
+	}
+	return endRequest(ctx, h.cp, payload.VmId, payload.SnapshotId, payload.RequestId, done(externalId))
 }
 
-// GiveUp reports the request failed, with the provider id when Incus has the snapshot: then the create did happen, and
-// its delete reaches Incus.
+// GiveUp ends the request Failed (RequestFailed on the old route), with the provider id when Incus has the snapshot:
+// then the create did happen, and its delete reaches Incus.
 func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
 	var payload createPayload
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	report := requestFailed(reasonCreateFailed, cause)
-	report.ExternalId = h.existingSnapshot(ctx, leased.ClusterId, payload)
-	return sendStatus(ctx, h.cp, payload.VmId, payload.SnapshotId, report)
+	if payload.RequestId == "" {
+		report := requestFailed(reasonCreateFailed, cause)
+		report.ExternalId, _ = h.existingSnapshot(ctx, leased.ClusterId, payload)
+		return sendStatus(ctx, h.cp, payload.VmId, payload.SnapshotId, report)
+	}
+	externalId, err := h.existingSnapshot(ctx, leased.ClusterId, payload)
+	if err != nil {
+		return err
+	}
+	end := failed(externalId, reasonCreateFailed, cause)
+	return endRequest(ctx, h.cp, payload.VmId, payload.SnapshotId, payload.RequestId, end)
 }
 
-// existingSnapshot returns the snapshot's provider id when Incus has it, "" when it does not or cannot be read.
-func (h *Create) existingSnapshot(ctx context.Context, clusterId string, payload createPayload) string {
+// existingSnapshot returns the snapshot's provider id when Incus has it, "" when it does not or the payload or cluster
+// cannot be read from; a read that fails is the error. The old route reads the error as no snapshot.
+func (h *Create) existingSnapshot(ctx context.Context, clusterId string, payload createPayload) (string, error) {
 	name, err := provider.SnapshotName(payload.SnapshotId)
 	if err != nil || payload.ProjectName == "" || payload.ExternalVmId == "" {
-		return ""
+		return "", nil
 	}
-	cl, err := h.clusters.Cluster(ctx, clusterId)
-	if err != nil {
-		return ""
+	exists, _, err := snapshotExists(ctx, h.clusters, clusterId, payload.ProjectName, payload.ExternalVmId, name)
+	if err != nil || !exists {
+		return "", err
 	}
-	if _, err := cl.Provider.GetInstanceSnapshot(ctx, payload.ProjectName, payload.ExternalVmId, name); err != nil {
-		return ""
-	}
-	return provider.SnapshotId(payload.ExternalVmId, name)
+	return provider.SnapshotId(payload.ExternalVmId, name), nil
 }

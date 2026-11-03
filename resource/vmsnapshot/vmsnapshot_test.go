@@ -275,7 +275,7 @@ func TestDecideReport(t *testing.T) {
 			t.Errorf("%s: send %v, want %v", c.name, send, c.wantSend)
 			continue
 		}
-		if send && (report.Report != "Observed" || report.Exists == nil || *report.Exists != c.wantExist) {
+		if send && report.Exists != c.wantExist {
 			t.Errorf("%s: report %+v", c.name, report)
 		}
 	}
@@ -293,8 +293,8 @@ func TestReconcile_ReportsOnTheSnapshotsVm_AGoneSnapshotAsNotFound(t *testing.T)
 
 	err := Reconcile(context.Background(), cp.Client(), p, clusterId, logger)
 
-	body := onlyBody(t, cp, statusPath)
-	if err != nil || body["report"] != "Observed" || body["exists"] != false {
+	body := onlyBody(t, cp, observationRoute)
+	if err != nil || body["exists"] != false {
 		t.Fatalf("err %v, report %v", err, body)
 	}
 	sent := logs.One("reconcile report sent")
