@@ -143,7 +143,8 @@ func (r *Reconciler) sentAlready(row ReconcilableVolume, report StatusReport) bo
 	return known && sent == instanceSet(report.AttachedTo)
 }
 
-// remember keeps the instances just reported for a volume something outside Titan may use, and forgets any other.
+// remember keeps the instances just reported for every volume reported in use, since the control plane may record any
+// of them as used outside Titan, and forgets a volume reported free or gone.
 func (r *Reconciler) remember(row ReconcilableVolume, report StatusReport) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

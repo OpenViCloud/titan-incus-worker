@@ -107,7 +107,8 @@ func TestRestore_WithARequest_EndsTheNewVolumesCreateDone_AndGiveUpEndsItFailed(
 	if err := NewRestore(cp.Client(), clusters(p)).Run(context.Background(), withRequest(restoreLeased()), testsupport.DiscardLogger()); err != nil {
 		t.Fatal(err)
 	}
-	if body := requestEnd(t, cp, newVolumeRoute); body["outcome"] != "Done" || body["externalId"] != "vol"+encodedId {
+	body := requestEnd(t, cp, newVolumeRoute)
+	if _, observed := body["observed"]; body["outcome"] != "Done" || body["externalId"] != "vol"+encodedId || !observed {
 		t.Fatalf("report: %v", body)
 	}
 
@@ -117,7 +118,7 @@ func TestRestore_WithARequest_EndsTheNewVolumesCreateDone_AndGiveUpEndsItFailed(
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := requestEnd(t, cp, newVolumeRoute)
+	body = requestEnd(t, cp, newVolumeRoute)
 	if _, carriesId := body["externalId"]; body["outcome"] != "Failed" || body["reason"] != volume.ReasonCreateFailed || carriesId {
 		t.Fatalf("report: %v", body)
 	}

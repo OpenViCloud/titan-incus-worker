@@ -51,8 +51,8 @@ func (h *Detach) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	return reportWhatIncusShows(ctx, h.cp, cl.Provider, payload, pool, logger)
 }
 
-// GiveUp reports the request failed, carrying what Incus shows: a detach that happened while its report failed is then
-// done, and only one that did not is withdrawn.
+// GiveUp ends the request with what Incus shows: a detach that happened while its report failed is Done, one that did
+// not is Failed (see giveUp).
 func (h *Detach) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
 	return giveUp(ctx, h.cp, h.clusters, leased, cause, reasonDetachFailed, func(names []string, _ attachPayload) bool {
 		return len(names) == 0

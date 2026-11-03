@@ -27,7 +27,7 @@ type restorePayload struct {
 }
 
 // Restore runs volume-snapshot.restore: a copy of the snapshot as a new volume (lab-storage 03). It ends the new volume's
-// create, like a volume create: Done with its provider id, once the copy has finished.
+// create, like a volume create: Done with its provider id and what Incus then shows of it, once the copy has finished.
 type Restore struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -72,7 +72,8 @@ func (h *Restore) Run(ctx context.Context, leased command.Leased, logger *slog.L
 		logger.Info("already exists; treating it as ours", "object", name)
 	}
 	if payload.RequestId != "" {
-		return volume.EndRequest(ctx, h.cp, payload.NewVolumeId, payload.RequestId, volume.Done(name, nil))
+		observed := volume.ReadObservation(ctx, cl.Provider, payload.ProjectName, pool, name, logger)
+		return volume.EndRequest(ctx, h.cp, payload.NewVolumeId, payload.RequestId, volume.Done(name, observed))
 	}
 	return volume.SendStatus(ctx, h.cp, payload.NewVolumeId, volume.StatusReport{Report: volume.ReportCreated, ExternalId: name})
 }

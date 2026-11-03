@@ -428,8 +428,9 @@ func TestDecideVolumeReport(t *testing.T) {
 		{"attachment unchanged", ReconcilableVolume{ExternalId: "volb", CurrentExistence: "Exists", CurrentAttachedExternalVmId: "vma"}, false, true, []string{"vma"}},
 		{"detached", ReconcilableVolume{ExternalId: "vola", CurrentExistence: "Exists", CurrentAttachedExternalVmId: "vma"}, true, true, nil},
 		{"moved to another instance", ReconcilableVolume{ExternalId: "volb", CurrentExistence: "Exists", CurrentAttachedExternalVmId: "vmz"}, true, true, []string{"vma"}},
-		// The worker cannot tell an instance outside Titan from another Titan VM: a row recorded elsewhere is always sent.
-		{"elsewhere, always sent", ReconcilableVolume{ExternalId: "volc", CurrentExistence: "Exists", CurrentAttachedExternalVmId: "vma", CurrentAttachedElsewhere: true}, true, true, []string{"vma", "foreign"}},
+		// The worker cannot tell an instance outside Titan from another Titan VM: a row recorded elsewhere is always a
+		// candidate; Reconciler sends it again only when its instances changed.
+		{"elsewhere, always a candidate", ReconcilableVolume{ExternalId: "volc", CurrentExistence: "Exists", CurrentAttachedExternalVmId: "vma", CurrentAttachedElsewhere: true}, true, true, []string{"vma", "foreign"}},
 		{"gone", ReconcilableVolume{ExternalId: "volgone", CurrentExistence: "Exists"}, true, false, nil},
 		{"gone, already recorded", ReconcilableVolume{ExternalId: "volgone", CurrentExistence: "NotFound"}, false, false, nil},
 		{"found again", ReconcilableVolume{ExternalId: "vola", CurrentExistence: "NotFound"}, true, true, nil},

@@ -83,7 +83,7 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 		return SendStatus(ctx, h.cp, payload.VolumeId, StatusReport{Report: ReportCreated, ExternalId: name})
 	}
 	pool := provider.StoragePoolOrDefault(cl.StoragePool)
-	observed := readObservation(ctx, cl.Provider, payload.ProjectName, pool, name, logger)
+	observed := ReadObservation(ctx, cl.Provider, payload.ProjectName, pool, name, logger)
 	return EndRequest(ctx, h.cp, payload.VolumeId, payload.RequestId, Done(name, observed))
 }
 
@@ -101,9 +101,9 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	return SendStatus(ctx, h.cp, payload.VolumeId, report)
 }
 
-// readObservation reads the volume once after a command did its work. A read that fails does not undo that work, so the
+// ReadObservation reads the volume once after a command did its work. A read that fails does not undo that work, so the
 // report goes without it and the reconciler reports the volume next cycle.
-func readObservation(ctx context.Context, p provider.Provider, project string, pool string, name string, logger *slog.Logger) *Observation {
+func ReadObservation(ctx context.Context, p provider.Provider, project string, pool string, name string, logger *slog.Logger) *Observation {
 	volume, err := p.GetVolume(ctx, project, pool, name)
 	if err != nil {
 		logger.Warn("volume not read after its command; the reconciler reports it", "object", name, "error", err)

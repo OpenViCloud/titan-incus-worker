@@ -70,8 +70,8 @@ func (h *Attach) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	return reportWhatIncusShows(ctx, h.cp, cl.Provider, payload, provider.StoragePoolOrDefault(cl.StoragePool), logger)
 }
 
-// GiveUp reports the request failed, carrying what Incus shows: an attach that happened while its report failed is then
-// done, and only one that did not is withdrawn.
+// GiveUp ends the request with what Incus shows: an attach that happened while its report failed is Done, one that did
+// not is Failed (see giveUp).
 func (h *Attach) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
 	return giveUp(ctx, h.cp, h.clusters, leased, cause, reasonAttachFailed, func(names []string, payload attachPayload) bool {
 		return slices.Contains(names, payload.ExternalVmId)
@@ -82,7 +82,7 @@ func (h *Attach) GiveUp(ctx context.Context, leased command.Leased, cause error,
 // retried, since that report is the only one the request gets; with a request id the Done goes without it.
 func reportWhatIncusShows(ctx context.Context, cp *controlplane.Client, p provider.Provider, payload attachPayload, pool string, logger *slog.Logger) error {
 	if payload.RequestId != "" {
-		observed := readObservation(ctx, p, payload.ProjectName, pool, payload.ExternalVolumeId, logger)
+		observed := ReadObservation(ctx, p, payload.ProjectName, pool, payload.ExternalVolumeId, logger)
 		return EndRequest(ctx, cp, payload.VolumeId, payload.RequestId, Done("", observed))
 	}
 	volume, err := p.GetVolume(ctx, payload.ProjectName, pool, payload.ExternalVolumeId)
@@ -92,9 +92,11 @@ func reportWhatIncusShows(ctx context.Context, cp *controlplane.Client, p provid
 	return SendStatus(ctx, cp, payload.VolumeId, Observed(true, InstanceNames(volume.UsedBy)))
 }
 
-// giveUp is the attach's and the detach's: the request failed, plus what Incus shows when it can be read — the volume
-// gone, or the instances using it. Unreadable, the report says only that the request failed. With a request id, Incus
-// showing what was asked (reached) makes the report the request's Done: the work happened, only its report was lost.
+// giveUp is the attach's and the detach's. With a request id: Incus showing what was asked (reached) makes the report the
+// request's Done — the work happened, only its report was lost (titan-ops architecture/resource-lifecycle.md#callback-routes);
+// otherwise Failed, with the instances using the volume when it can be read, alone when it cannot or the volume is gone.
+// Without one, the old route: the request failed, plus what Incus shows when it can be read — the volume gone, or the
+// instances using it.
 func giveUp(ctx context.Context, cp *controlplane.Client, clusters cluster.Clusters, leased command.Leased, cause error,
 	reason string, reached func(names []string, payload attachPayload) bool) error {
 	var payload attachPayload
