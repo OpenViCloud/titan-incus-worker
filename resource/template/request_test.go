@@ -111,7 +111,8 @@ func TestSync_WithARequest_PullsTheImage_AndEndsItDone_CarryingTheAlias(t *testi
 	}
 }
 
-// A resend finds the alias its first run made: nothing is written, and the request ends Done all the same.
+// A lease after a lost Done finds the alias its first run made: nothing is written, and the request ends Done all
+// the same.
 func TestSync_WithARequest_AliasPresent_WritesNothing_AndEndsItDone_CarryingTheAlias(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAlias(testsupport.NewProvider())
@@ -157,7 +158,7 @@ func TestSync_WithARequest_AFailedWrite_ReportsNothing_AndReturnsTheError(t *tes
 }
 
 // The alias is the template's id on the cluster: a give-up that carries it tells the control plane the sync did
-// happen, so customers see the template there (titan-ops features/catalog/design.md#template-reports).
+// happen, so customers see the template there.
 func TestSync_WithARequest_GiveUp_AliasOfTheClusterArchitecture_EndsItFailed_CarryingTheAlias(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAlias(testsupport.NewProvider())
@@ -176,6 +177,22 @@ func TestSync_WithARequest_GiveUp_AliasAbsent_EndsItFailed_WithoutAnId(t *testin
 	cp := testsupport.NewControlPlane(t)
 
 	err := giveUpSync(syncWith(cp, testsupport.NewProvider()), withRequest(syncLeased()), errors.New("pull timed out"))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := requestEnd(t, cp); !isFailed(body, reasonSyncFailed, "pull timed out", false) {
+		t.Fatalf("report %v", body)
+	}
+}
+
+// An alias whose image the list does not show has no architecture to check: no template there.
+func TestSync_WithARequest_GiveUp_AliasOfAnUnlistedImage_EndsItFailed_WithoutAnId(t *testing.T) {
+	cp := testsupport.NewControlPlane(t)
+	p := withAlias(testsupport.NewProvider())
+	p.UnlistedImages = map[string]bool{"fp-" + alias: true}
+
+	err := giveUpSync(syncWith(cp, p), withRequest(syncLeased()), errors.New("pull timed out"))
 
 	if err != nil {
 		t.Fatal(err)

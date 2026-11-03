@@ -12,7 +12,7 @@ import (
 // The reports of the old route, which UpdateTemplateStatusCommandHandler maps onto the waiting sync until rollout
 // phase 6 (titan-ops architecture/resource-lifecycle.md#rollout). Incus has no status word for an image alias
 // (titan-ops features/catalog/design.md#template-state-is-existence). A template is never deleted, so there is no
-// Deleted report; the reconciler's observations went to their own route.
+// Deleted report; the reconciler's observations use the observation route.
 const (
 	reportCreated       = "Created"
 	reportRequestFailed = "RequestFailed"
@@ -48,7 +48,8 @@ type RequestEnd struct {
 	Detail     string `json:"detail,omitempty"`
 }
 
-// done carries the alias: it is the template's id on the cluster, and a Done without it is refused.
+// done carries the alias: it is the template's id on the cluster, and a Done without it is refused while none is
+// recorded.
 func done(alias string) RequestEnd {
 	return RequestEnd{Outcome: controlplane.OutcomeDone, ExternalId: alias}
 }

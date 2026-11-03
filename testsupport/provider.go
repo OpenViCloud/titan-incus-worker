@@ -117,7 +117,9 @@ type Provider struct {
 	ListImagesErr          error
 	// An alias's image has fingerprint "fp-" + alias; its architecture is ImageArchitectures[fingerprint], or
 	// x86_64 when unset.
-	ImageArchitectures        map[string]string
+	ImageArchitectures map[string]string
+	// UnlistedImages are fingerprints ListImages leaves out although an alias points to them.
+	UnlistedImages            map[string]bool
 	ServerArchitectures       []string
 	GetServerArchitecturesErr error
 	DeletedImages             []string
@@ -515,6 +517,9 @@ func (p *Provider) ListImages(ctx context.Context) ([]api.Image, error) {
 	images := []api.Image{}
 	for alias := range p.Aliases {
 		fingerprint := "fp-" + alias
+		if p.UnlistedImages[fingerprint] {
+			continue
+		}
 		architecture := p.ImageArchitectures[fingerprint]
 		if architecture == "" {
 			architecture = "x86_64"
