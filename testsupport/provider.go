@@ -54,8 +54,8 @@ type Provider struct {
 	GetNetworkErr    error
 	UpdatedNetworks  []api.NetworkPut
 	UpdateNetworkErr error
-	// NetworkStatuses, when set, is the status each GetNetwork answers in turn, the last one repeating; GetNetworkReads
-	// counts the reads.
+	// NetworkStatuses, when set, is the status each GetNetwork that finds the network answers in turn, the last one
+	// repeating; GetNetworkReads counts every read, errors and not found included.
 	NetworkStatuses []string
 	GetNetworkReads int
 	// ACLs is keyed by project + "/" + name; an ACL's ETag is its write count, as text.

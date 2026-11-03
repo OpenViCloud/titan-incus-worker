@@ -264,6 +264,21 @@ func TestDelete_WithARequest_GiveUp_IsDone_WhenIncusNoLongerHasTheNetwork_ElseFa
 	}
 }
 
+func TestDelete_WithARequest_GiveUp_NetworkGoneButItsAclStays_IsFailed(t *testing.T) {
+	cp := testsupport.NewControlPlane(t)
+	p := testsupport.NewProvider()
+	p.DeleteACLErr = errors.New("acl in use")
+
+	err := giveUpCommand(newDelete(cp, p), withRequest(deleteLeased()), errors.New("acl in use"))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := requestEnd(t, cp); body["outcome"] != "Failed" || body["reason"] != reasonDeleteFailed {
+		t.Errorf("report %v", body)
+	}
+}
+
 func TestDelete_WithARequest_GiveUp_NetworkReadFails_IsRetryable_AndReportsNothing(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()

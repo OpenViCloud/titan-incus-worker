@@ -23,7 +23,7 @@ type deletePayload struct {
 
 // Delete runs network.delete and ends its request Done (Deleted on the old route). Giving up ends it Failed, which
 // gives the network back to the tenant (titan-ops architecture/desired-and-current.md#abandoned-request), unless Incus
-// no longer has the network.
+// no longer has the network nor its ACL.
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -86,14 +86,25 @@ func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	if err != nil {
 		return err
 	}
-	// The network is gone but its report never arrived: giving it back would leave the tenant a network Incus does not
-	// have, so the request is Done.
-	if gone {
+	// The network is gone: its report never arrived, or Run kept failing on the ACL it deletes second. The give-up
+	// removes the ACL once more; with both gone, giving the network back would leave the tenant one Incus does not
+	// have, so the request is Done. An ACL still there ends it Failed, and the tenant's next delete tries it again.
+	if gone && h.aclRemoved(ctx, leased.ClusterId, payload) {
 		logger.Info("already gone; the give-up ends the request done", "object", payload.ExternalNetworkId)
 		return endRequest(ctx, h.cp, payload.NetworkId, payload.RequestId, done("", nil))
 	}
 	end := failed("", nil, reasonDeleteFailed, cause)
 	return endRequest(ctx, h.cp, payload.NetworkId, payload.RequestId, end)
+}
+
+// aclRemoved deletes the network's ACL: true when Incus has it no longer.
+func (h *Delete) aclRemoved(ctx context.Context, clusterId string, payload deletePayload) bool {
+	cl, err := h.clusters.Cluster(ctx, clusterId)
+	if err != nil {
+		return false
+	}
+	err = cl.Provider.DeleteNetworkACL(ctx, payload.ProjectName, provider.NetworkAclName(payload.NetworkId))
+	return err == nil || provider.IsNotFound(err)
 }
 
 // networkIsGone reads the network: only Incus answering 404 is gone. A read that fails is returned, so the next lease
