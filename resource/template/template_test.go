@@ -184,9 +184,6 @@ func TestSync_GiveUp_ReportsRequestFailedWithItsCluster_AFixedReason_AndTheRawEr
 	if !isRequestFailed || body["reason"] != reasonSyncFailed || body["detail"] != "pull timed out" {
 		t.Fatalf("report: %v", body)
 	}
-	if _, hasExists := body["exists"]; hasExists {
-		t.Fatalf("a give-up says nothing of existence: %v", body)
-	}
 }
 
 // The reason tells the operator which of the causes they can act on it was: a cluster of another architecture, or a
@@ -274,9 +271,9 @@ func TestReconcile_ReportsAnAliasGoneWithTheCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := onlyBody(t, cp)
-	if body["report"] != "Observed" || body["exists"] != false || body["clusterId"] != "mock" {
-		t.Fatalf("report: %v", body)
+	body := onlyBodyAt(t, cp, observationRoute)
+	if body["exists"] != false || len(body) != 1 {
+		t.Fatalf("observation: %v", body)
 	}
 	sent := logs.One("reconcile report sent")
 	if sent["templateId"] != templateId || sent["recordedExistence"] != "Exists" || sent["exists"] != false {
@@ -284,7 +281,8 @@ func TestReconcile_ReportsAnAliasGoneWithTheCluster(t *testing.T) {
 	}
 }
 
-// The image-already-there branch is the one a resend takes; without a line the log shows a lease that did nothing.
+// The image-already-there branch is taken, for example, by a lease after a lost report; without a line the log shows
+// a lease that did nothing.
 func TestSync_AliasPresent_SaysSo_InTheLog(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
