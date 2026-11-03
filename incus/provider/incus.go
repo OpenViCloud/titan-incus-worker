@@ -43,6 +43,14 @@ func (p *Incus) GetInstance(ctx context.Context, project string, name string) (*
 	return instance, nil
 }
 
+func (p *Incus) GetInstanceFull(ctx context.Context, project string, name string) (*api.InstanceFull, error) {
+	instance, _, err := p.server.UseProject(project).GetInstanceFull(name)
+	if err != nil {
+		return nil, fmt.Errorf("get instance %s with its state in project %s: %w", name, project, err)
+	}
+	return instance, nil
+}
+
 func (p *Incus) CreateInstance(ctx context.Context, project string, instance api.InstancesPost) error {
 	operation, err := p.server.UseProject(project).CreateInstance(instance)
 	if err != nil {

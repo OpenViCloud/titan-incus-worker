@@ -250,11 +250,12 @@ func TestReconcile_ReportsOnlyChanges_AndSkipsTheProviderWhenTheListIsEmpty(t *t
 	if len(cp.RequestsTo("PATCH /internal/vms/a/")) != 0 {
 		t.Fatal("reported an unchanged VM")
 	}
-	body := onlyBody(t, cp, "PATCH /internal/vms/b/status")
-	if body["report"] != "Observed" || body["exists"] != true || body["status"] != "Running" || body["ipAddress"] != "10.40.0.3" {
+	body := onlyBody(t, cp, "PATCH /internal/vms/b/observation")
+	observed := observedOf(t, body)
+	if body["exists"] != true || observed["status"] != "Running" || observed["ipAddress"] != "10.40.0.3" {
 		t.Fatalf("want vm b Running with its address, got %v", body)
 	}
-	if _, hasIpv6 := body["publicIpv6Address"]; hasIpv6 {
+	if _, hasIpv6 := observed["publicIpv6Address"]; hasIpv6 {
 		t.Fatalf("a VM without public IPv6 sends none: %v", body)
 	}
 	sent := logs.One("reconcile report sent")
@@ -288,11 +289,31 @@ func TestReconcile_SendsThePublicIpv6_AndLogsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body := onlyBody(t, cp, "PATCH /internal/vms/a/status")
-	if body["status"] != "Running" || body["ipAddress"] != "10.40.0.2" || body["publicIpv6Address"] != "2001:41d0:d00:d470::10" {
-		t.Fatalf("want vm a with its public IPv6, got %v", body)
+	observed := observedOf(t, onlyBody(t, cp, "PATCH /internal/vms/a/observation"))
+	if observed["status"] != "Running" || observed["ipAddress"] != "10.40.0.2" || observed["publicIpv6Address"] != "2001:41d0:d00:d470::10" {
+		t.Fatalf("want vm a with its public IPv6, got %v", observed)
 	}
 	if sent := logs.One("reconcile report sent"); sent["publicIpv6Address"] != "2001:41d0:d00:d470::10" {
 		t.Fatalf("report line: %v", sent)
+	}
+}
+
+func TestReconcile_AnInstanceIncusDoesNotHave_IsObservedAbsent_OnTheObservationRoute(t *testing.T) {
+	cp := testsupport.NewControlPlane(t)
+	cp.Respond(http.MethodGet, "/internal/reconcile/vms?clusterId=mock", http.StatusOK,
+		`[{"id":"a","externalId":"vm-a","currentState":"Running","currentExistence":"Exists","ipAddress":"10.40.0.2","publicIpv6Address":null}]`)
+	p := testsupport.NewProvider()
+	p.VirtualMachines = []api.InstanceFull{running("vm-other", nil)}
+
+	if err := Reconcile(context.Background(), cp.Client(), p, "mock", testsupport.DiscardLogger()); err != nil {
+		t.Fatal(err)
+	}
+
+	body := onlyBody(t, cp, "PATCH /internal/vms/a/observation")
+	if _, has := body["observed"]; has || body["exists"] != false {
+		t.Fatalf("want exists false and nothing observed, got %v", body)
+	}
+	if len(cp.RequestsTo("PATCH /internal/vms/a/status")) != 0 {
+		t.Fatalf("the reconciler used the old route: %+v", cp.Requests())
 	}
 }

@@ -24,7 +24,10 @@ const (
 
 // createPayload mirrors ProviderCommandQueue.EnqueueVmCreateAsync. templateId is already the cluster's image alias.
 type createPayload struct {
-	VmId              string  `json:"vmId"`
+	VmId string `json:"vmId"`
+	// Empty on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
+	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	RequestId         string  `json:"requestId"`
 	Name              string  `json:"name"`
 	CpuUnits          float64 `json:"cpuUnits"`
 	VcpuCount         int     `json:"vcpuCount"`
@@ -37,8 +40,9 @@ type createPayload struct {
 	VendorData        string  `json:"vendorData"`
 }
 
-// Create runs vm.create. It reports only the provider id (Created) or the give-up; the cluster's reconciler reports
-// Running (titan-ops architecture/desired-and-current.md#desired-and-current).
+// Create runs vm.create and ends the request it names: Done with the instance name and what it read of the instance,
+// Failed when it gives up (titan-ops architecture/resource-lifecycle.md#kinds). A command without a request id reports
+// Created or the give-up on the old route.
 type Create struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -73,13 +77,16 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	}
 	if isOurs {
 		logger.Info("already exists; treating it as ours", "object", request.Name)
-		// The earlier run may have died between creating and starting it: a stopped instance here would leave the
-		// VM waiting for a Running that nothing asks for.
+		// The earlier run may have died between creating and starting it, and a create asks for a started instance.
 		if err := startIfStopped(ctx, cl.Provider, payload.ProjectName, request.Name, logger); err != nil {
 			return err
 		}
 	}
-	return sendStatus(ctx, h.cp, payload.VmId, statusReport{Report: reportCreated, ExternalId: request.Name})
+	if payload.RequestId == "" {
+		return sendStatus(ctx, h.cp, payload.VmId, statusReport{Report: reportCreated, ExternalId: request.Name})
+	}
+	observed := readObserved(ctx, cl.Provider, payload.ProjectName, request.Name, logger)
+	return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, requestEnd{Outcome: outcomeDone, ExternalId: request.Name, Observed: observed})
 }
 
 // GiveUp reports the request failure. It carries the provider id when the instance exists, from this run or an earlier
@@ -90,9 +97,13 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
+	existing := h.existingInstance(ctx, leased.ClusterId, payload)
+	if payload.RequestId != "" {
+		return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, failedEnd(existing, reasonProvisionFailed, cause))
+	}
 	report := statusReport{
 		Report:     reportRequestFailed,
-		ExternalId: h.existingInstance(ctx, leased.ClusterId, payload),
+		ExternalId: existing,
 		Reason:     reasonProvisionFailed,
 		Detail:     cause.Error(),
 	}

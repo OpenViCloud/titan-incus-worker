@@ -16,14 +16,17 @@ import (
 const forceStopTimeoutSeconds = 30
 
 type deletePayload struct {
-	VmId         string `json:"vmId"`
+	VmId string `json:"vmId"`
+	// Empty on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
+	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	RequestId    string `json:"requestId"`
 	ExternalVmId string `json:"externalVmId"`
 	ProjectName  string `json:"projectName"`
 }
 
-// Delete runs vm.delete and reports Deleted once Incus no longer has the instance
-// (titan-ops architecture/desired-and-current.md#forget-on-provider-confirm). It has no give-up callback: the VM keeps its
-// delete waiting, and a repeated delete reruns the failed command.
+// Delete runs vm.delete and ends the request it names once Incus no longer has the instance
+// (titan-ops architecture/desired-and-current.md#forget-on-provider-confirm), Failed when it gives up. A command without
+// a request id reports Deleted on success and nothing on giving up.
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -49,11 +52,24 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := removeInstance(ctx, cl.Provider, payload.ProjectName, payload.ExternalVmId, logger); err != nil {
 		return err
 	}
-	return sendStatus(ctx, h.cp, payload.VmId, statusReport{Report: reportDeleted})
+	if payload.RequestId == "" {
+		return sendStatus(ctx, h.cp, payload.VmId, statusReport{Report: reportDeleted})
+	}
+	return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, requestEnd{Outcome: outcomeDone})
 }
 
 func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
-	return nil
+	var payload deletePayload
+	if err := command.DecodePayload(leased, &payload); err != nil {
+		return err
+	}
+	if payload.RequestId == "" {
+		return nil
+	}
+	if payload.VmId == "" {
+		return command.Permanent(fmt.Errorf("vm.delete payload lacks vmId: nobody to tell"))
+	}
+	return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, failedEnd("", reasonDeleteFailed, cause))
 }
 
 // removeInstance stops then deletes; Incus refuses to delete a running instance (lab 05). A 404 at any step — the
