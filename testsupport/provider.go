@@ -41,16 +41,23 @@ type Provider struct {
 	VirtualMachines        []api.InstanceFull
 	ListVirtualMachinesErr error
 	GetInstanceFullErr     error
-	Networks               []api.Network
-	CreatedNetworks        []api.NetworksPost
-	CreateNetworkErr       error
-	ListNetworksErr        error
-	DeletedNetworks        []string
-	DeleteNetworkErr       error
+	// Networks holds the cluster's networks; a CreateNetwork that succeeds adds its network, Created, unless one of
+	// that project and name is there already.
+	Networks         []api.Network
+	CreatedNetworks  []api.NetworksPost
+	CreateNetworkErr error
+	ListNetworksErr  error
+	DeletedNetworks  []string
+	DeleteNetworkErr error
 	// GetNetwork reads Networks; its ETag is NetworkEtag. UpdateNetwork records the write and refuses a stale ETag.
 	NetworkEtag      string
+	GetNetworkErr    error
 	UpdatedNetworks  []api.NetworkPut
 	UpdateNetworkErr error
+	// NetworkStatuses, when set, is the status each GetNetwork answers in turn, the last one repeating; GetNetworkReads
+	// counts the reads.
+	NetworkStatuses []string
+	GetNetworkReads int
 	// ACLs is keyed by project + "/" + name; an ACL's ETag is its write count, as text.
 	ACLs         map[string]*api.NetworkACL
 	aclVersions  map[string]int
@@ -61,6 +68,7 @@ type Provider struct {
 	DeletedACLs  []string
 	DeleteACLErr error
 	ListACLsErr  error
+	GetACLErr    error
 	// LoadBalancers is keyed by project + "/" + network + "/" + listen address; an ETag is "lb-etag".
 	LoadBalancers         map[string]*api.NetworkLoadBalancer
 	CreatedLoadBalancers  []api.NetworkLoadBalancersPost
@@ -252,7 +260,18 @@ func (p *Provider) CreateNetwork(ctx context.Context, project string, network ap
 	p.count()
 	p.CreatedNetworks = append(p.CreatedNetworks, network)
 	p.Order = append(p.Order, "create-network "+project+"/"+network.Name)
-	return p.CreateNetworkErr
+	if p.CreateNetworkErr != nil {
+		return p.CreateNetworkErr
+	}
+	for _, held := range p.Networks {
+		if held.Project == project && held.Name == network.Name {
+			return nil
+		}
+	}
+	p.Networks = append(p.Networks, api.Network{
+		Name: network.Name, Project: project, Type: network.Type, Status: "Created", NetworkPut: network.NetworkPut,
+	})
+	return nil
 }
 
 func (p *Provider) DeleteNetwork(ctx context.Context, project string, name string) error {
@@ -272,9 +291,19 @@ func (p *Provider) ListNetworksAllProjects(ctx context.Context) ([]api.Network, 
 
 func (p *Provider) GetNetwork(ctx context.Context, project string, name string) (*api.Network, string, error) {
 	p.count()
+	p.GetNetworkReads++
+	if p.GetNetworkErr != nil {
+		return nil, "", p.GetNetworkErr
+	}
 	for i := range p.Networks {
 		network := p.Networks[i]
 		if network.Project == project && network.Name == name {
+			if len(p.NetworkStatuses) > 0 {
+				network.Status = p.NetworkStatuses[0]
+			}
+			if len(p.NetworkStatuses) > 1 {
+				p.NetworkStatuses = p.NetworkStatuses[1:]
+			}
 			return &network, p.NetworkEtag, nil
 		}
 	}
@@ -312,6 +341,9 @@ func (p *Provider) PutACL(project string, acl api.NetworkACL) {
 
 func (p *Provider) GetNetworkACL(ctx context.Context, project string, name string) (*api.NetworkACL, string, error) {
 	p.count()
+	if p.GetACLErr != nil {
+		return nil, "", p.GetACLErr
+	}
 	key := project + "/" + name
 	acl, found := p.ACLs[key]
 	if !found {

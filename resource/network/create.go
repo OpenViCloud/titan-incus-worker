@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"time"
 
 	"github.com/lxc/incus/v7/shared/api"
 
@@ -52,7 +53,11 @@ func DefaultAction(ingressPolicy string, egressPolicy string) (string, error) {
 }
 
 type createPayload struct {
-	NetworkId            string `json:"networkId"`
+	NetworkId string `json:"networkId"`
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
+	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
+	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	RequestId            string `json:"requestId"`
 	Name                 string `json:"name"`
 	ProjectName          string `json:"projectName"`
 	Cidr                 string `json:"cidr"`
@@ -63,15 +68,32 @@ type createPayload struct {
 	PublicIpv6RouterAddress string `json:"publicIpv6RouterAddress"`
 }
 
+// statusPending is the Incus status of a network not yet set up on every member of the cluster.
+const statusPending = "Pending"
+
+// Settling is how long a create waits for its network to leave Pending, and how often it reads it.
+type Settling struct {
+	Every  time.Duration
+	Within time.Duration
+}
+
+// DefaultSettling: the control plane counts a network usable by its status, so a create that ends on Pending leaves
+// the tenant a network they cannot use until the reconciler's next cycle
+// (titan-ops architecture/resource-lifecycle.md#callback-routes).
+var DefaultSettling = Settling{Every: time.Second, Within: 30 * time.Second}
+
 // Create runs network.create: the network's ACL, then an isolated OVN network in the tenant's project that carries
-// it. It reports the provider id (Created); the reconciler reports Active.
+// it. With a request id it ends the request Done with the provider id, the subnet and the status Incus shows once the
+// network has left Pending or the wait ran out. Without one it reports Created on the old route, and the reconciler
+// reports the status.
 type Create struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
+	settling Settling
 }
 
 func NewCreate(cp *controlplane.Client, clusters cluster.Clusters) *Create {
-	return &Create{cp: cp, clusters: clusters}
+	return &Create{cp: cp, clusters: clusters, settling: DefaultSettling}
 }
 
 func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Logger) error {
@@ -130,12 +152,8 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := checkPublicIpv6(ctx, cl.Provider, payload.ProjectName, request.Name, cl.OvnUplinkNetwork, publicIpv6); err != nil {
 		return err
 	}
-	report := statusReport{
-		Report:     reportCreated,
-		ExternalId: request.Name,
-		Cidr:       payload.Cidr,
-		Gateway:    address.Gateway,
-	}
+	cidr := payload.Cidr
+	gateway := address.Gateway
 	// Titan chose no CIDR: Incus picked one ("auto"); read it back so Titan records the subnet the VMs get.
 	cidrWasChosenByIncus := payload.Cidr == ""
 	if cidrWasChosenByIncus {
@@ -143,10 +161,43 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 		if err != nil {
 			return err
 		}
-		report.Cidr = picked.Cidr
-		report.Gateway = picked.Gateway
+		cidr = picked.Cidr
+		gateway = picked.Gateway
 	}
-	return sendStatus(ctx, h.cp, payload.NetworkId, report)
+	if payload.RequestId == "" {
+		report := statusReport{Report: reportCreated, ExternalId: request.Name, Cidr: cidr, Gateway: gateway}
+		return sendStatus(ctx, h.cp, payload.NetworkId, report)
+	}
+	// A read that fails returns its error: the next lease runs the create again, which finds the network ours.
+	status, err := settledStatus(ctx, cl.Provider, payload.ProjectName, request.Name, h.settling)
+	if err != nil {
+		return err
+	}
+	observed := &Observation{Status: status, Cidr: cidr, Gateway: gateway}
+	return endRequest(ctx, h.cp, payload.NetworkId, payload.RequestId, done(request.Name, observed))
+}
+
+// settledStatus reads the network until its status is no longer Pending, and returns the status it read last when the
+// wait runs out: the create is done either way, and a status that stays Pending is the reconciler's to report
+// (titan-ops architecture/resource-lifecycle.md#kinds).
+func settledStatus(ctx context.Context, p provider.Provider, project string, name string,
+	settling Settling) (string, error) {
+	deadline := time.Now().Add(settling.Within)
+	for {
+		network, _, err := p.GetNetwork(ctx, project, name)
+		if err != nil {
+			return "", err
+		}
+		isSettled := network.Status != statusPending
+		if isSettled || !time.Now().Before(deadline) {
+			return network.Status, nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(settling.Every):
+		}
+	}
 }
 
 func (h *Create) pickedSubnet(ctx context.Context, cl *cluster.Cluster, payload createPayload) (Subnet, error) {
@@ -169,7 +220,8 @@ func (h *Create) pickedSubnet(ctx context.Context, cl *cluster.Cluster, payload 
 	return Subnet{}, fmt.Errorf("network %s is not on the cluster after its create", name)
 }
 
-// GiveUp reports the give-up status, with the provider id when the network exists so its delete still reaches Incus.
+// GiveUp ends the request Failed (RequestFailed on the old route), with the provider id and subnet when the network
+// exists so its delete still reaches Incus.
 func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
 	var payload createPayload
 	if err := command.DecodePayload(leased, &payload); err != nil {
@@ -208,7 +260,15 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 			}
 		}
 	}
-	return sendStatus(ctx, h.cp, payload.NetworkId, report)
+	if payload.RequestId == "" {
+		return sendStatus(ctx, h.cp, payload.NetworkId, report)
+	}
+	var observed *Observation
+	if report.Cidr != "" || report.Gateway != "" {
+		observed = &Observation{Cidr: report.Cidr, Gateway: report.Gateway}
+	}
+	end := failed(report.ExternalId, observed, reasonCreateFailed, cause)
+	return endRequest(ctx, h.cp, payload.NetworkId, payload.RequestId, end)
 }
 
 // deleteAcl removes the ACL an earlier run made before its network failed: the control plane deletes a network with no

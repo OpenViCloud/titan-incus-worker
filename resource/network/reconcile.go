@@ -25,8 +25,8 @@ type ReconcilableNetwork struct {
 	CurrentExistence string  `json:"currentExistence"`
 }
 
-// Reconcile observes one cluster's networks and reports what differs; it never acts on Incus. A failed read skips the
-// cycle: reading it as "no network" would report every network gone.
+// Reconcile observes one cluster's networks and reports what differs on their observation route; it never acts on Incus
+// and never ends a request. A failed read skips the cycle: reading it as "no network" would report every network gone.
 func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider, clusterId string, logger *slog.Logger) error {
 	var rows []ReconcilableNetwork
 	if err := cp.GetJSON(ctx, "/internal/reconcile/networks?clusterId="+url.QueryEscape(clusterId), &rows); err != nil {
@@ -49,9 +49,13 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 		if !shouldReport {
 			continue
 		}
-		err := sendStatus(ctx, cp, row.Id, report)
+		status := ""
+		if report.Observed != nil {
+			status = report.Observed.Status
+		}
+		err := sendObservation(ctx, cp, row.Id, report)
 		if err != nil {
-			logger.Warn("network report failed; next cycle sends it again", "networkId", row.Id, "status", report.Status, "error", err)
+			logger.Warn("network report failed; next cycle sends it again", "networkId", row.Id, "status", status, "error", err)
 			continue
 		}
 		recordedState := ""
@@ -59,7 +63,7 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 			recordedState = *row.CurrentState
 		}
 		logger.Info("reconcile report sent", "networkId", row.Id, "recordedState", recordedState,
-			"recordedExistence", row.CurrentExistence, "exists", *report.Exists, "status", report.Status)
+			"recordedExistence", row.CurrentExistence, "exists", report.Exists, "status", status)
 	}
 	return nil
 }
@@ -68,20 +72,18 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 // recorded. The status goes as Incus spells it, whatever the word. Absent is NotFound, never Deleted: only the delete
 // command reports that, since a reconciler pointed at the wrong cluster also finds nothing
 // (titan-ops architecture/desired-and-current.md#existence-axis).
-func DecideReport(row ReconcilableNetwork, statusByName map[string]string) (statusReport, bool) {
+func DecideReport(row ReconcilableNetwork, statusByName map[string]string) (ObservationBody, bool) {
 	status, present := statusByName[row.ExternalId]
 	if !present {
-		absent := false
 		alreadyRecorded := row.CurrentExistence == existenceNotFound
-		return statusReport{Report: reportObserved, Exists: &absent}, !alreadyRecorded
+		return ObservationBody{Exists: false}, !alreadyRecorded
 	}
 
-	exists := true
 	recordedState := ""
 	if row.CurrentState != nil {
 		recordedState = *row.CurrentState
 	}
 	existenceChanged := row.CurrentExistence != existenceExists
 	stateChanged := status != recordedState
-	return statusReport{Report: reportObserved, Exists: &exists, Status: status}, existenceChanged || stateChanged
+	return ObservationBody{Exists: true, Observed: &Observation{Status: status}}, existenceChanged || stateChanged
 }

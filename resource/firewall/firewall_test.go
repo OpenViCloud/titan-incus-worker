@@ -421,7 +421,11 @@ func TestDecideReport(t *testing.T) {
 		if !send {
 			continue
 		}
-		isRightReport := got.Report == reportObserved && got.Exists != nil && *got.Exists == c.wantExists && got.State == c.wantState
+		gotState := ""
+		if got.Observed != nil {
+			gotState = got.Observed.State
+		}
+		isRightReport := got.Exists == c.wantExists && (got.Observed != nil) == c.wantExists && gotState == c.wantState
 		if !isRightReport {
 			t.Errorf("%s: got %+v", c.name, got)
 		}
@@ -441,12 +445,12 @@ func TestReconcile_SendsTheIncusStateAsIs_AndGoneAsNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	present := onlyBody(t, cp, ruleId)
-	if present["report"] != reportObserved || present["exists"] != true || present["state"] != "logged" {
+	present := observationOf(t, cp, ruleId)
+	if observed, _ := present["observed"].(map[string]any); present["exists"] != true || observed["state"] != "logged" {
 		t.Fatalf("present rule: %v", present)
 	}
-	gone := onlyBody(t, cp, otherRule)
-	if gone["report"] != reportObserved || gone["exists"] != false || gone["state"] != nil {
+	gone := observationOf(t, cp, otherRule)
+	if gone["exists"] != false || gone["observed"] != nil {
 		t.Fatalf("gone rule: %v", gone)
 	}
 	lines := map[any]map[string]any{}
@@ -473,8 +477,8 @@ func TestReconcile_RuleGone_NeverReportsDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if onlyBody(t, cp, ruleId)["report"] != reportObserved {
-		t.Fatal("want Observed, never Deleted")
+	if observationOf(t, cp, ruleId)["exists"] != false {
+		t.Fatal("want an observation that it is not there, never Deleted")
 	}
 }
 
