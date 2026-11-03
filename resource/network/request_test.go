@@ -295,7 +295,8 @@ func TestDelete_WithARequest_GiveUp_NetworkGoneButItsAclDeleteFails_IsFailed(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body := requestEnd(t, cp); body["outcome"] != "Failed" || body["reason"] != reasonDeleteFailed {
+	body := requestEnd(t, cp)
+	if body["outcome"] != "Failed" || body["reason"] != reasonDeleteFailed || body["detail"] != "acl in use" {
 		t.Errorf("report %v", body)
 	}
 }
