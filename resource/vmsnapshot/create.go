@@ -14,9 +14,7 @@ import (
 // createPayload mirrors ProviderCommandQueue.EnqueueVmSnapshotCreateAsync. name is the tenant's; Incus gets Titan's.
 type createPayload struct {
 	SnapshotId string `json:"snapshotId"`
-	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
-	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
-	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes).
 	RequestId    string `json:"requestId"`
 	VmId         string `json:"vmId"`
 	ExternalVmId string `json:"externalVmId"`
@@ -25,7 +23,7 @@ type createPayload struct {
 }
 
 // Create runs vm-snapshot.create. Incus has made it once the operation returns, so the create is done: it ends the
-// request Done with the provider id "<instance>/<snapshot>" (Created on the old route).
+// request Done with the provider id "<instance>/<snapshot>".
 type Create struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -40,9 +38,11 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	isComplete := payload.SnapshotId != "" && payload.VmId != "" && payload.ExternalVmId != "" && payload.ProjectName != ""
+	isComplete := payload.SnapshotId != "" && payload.RequestId != "" && payload.VmId != "" &&
+		payload.ExternalVmId != "" && payload.ProjectName != ""
 	if !isComplete {
-		return command.Permanent(fmt.Errorf("vm-snapshot.create payload lacks snapshotId, vmId, externalVmId or projectName"))
+		return command.Permanent(fmt.Errorf(
+			"vm-snapshot.create payload lacks snapshotId, requestId, vmId, externalVmId or projectName"))
 	}
 	name, err := provider.SnapshotName(payload.SnapshotId)
 	if err != nil {
@@ -62,24 +62,19 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if isOurs {
 		logger.Info("already exists; treating it as ours", "object", externalId)
 	}
-	if payload.RequestId == "" {
-		report := statusReport{Report: reportCreated, ExternalId: externalId}
-		return sendStatus(ctx, h.cp, payload.VmId, payload.SnapshotId, report)
-	}
 	return endRequest(ctx, h.cp, payload.VmId, payload.SnapshotId, payload.RequestId, done(externalId))
 }
 
-// GiveUp ends the request Failed (RequestFailed on the old route), with the provider id when Incus has the snapshot:
-// then the create did happen, and its delete reaches Incus.
+// GiveUp ends the request Failed, with the provider id when Incus has the snapshot: then the create did happen, and its
+// delete reaches Incus.
 func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
 	var payload createPayload
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
 	if payload.RequestId == "" {
-		report := requestFailed(reasonCreateFailed, cause)
-		report.ExternalId, _ = h.existingSnapshot(ctx, leased.ClusterId, payload)
-		return sendStatus(ctx, h.cp, payload.VmId, payload.SnapshotId, report)
+		logger.Warn("no request id; nothing to end")
+		return nil
 	}
 	externalId, err := h.existingSnapshot(ctx, leased.ClusterId, payload)
 	if err != nil {
@@ -90,8 +85,7 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 }
 
 // existingSnapshot returns the snapshot's provider id when Incus has it, "" when it does not, when the payload lacks what
-// the read needs, or when the worker cannot reach the cluster for good; a read that fails is the error. The old route
-// reads the error as no snapshot.
+// the read needs, or when the worker cannot reach the cluster for good; a read that fails is the error.
 func (h *Create) existingSnapshot(ctx context.Context, clusterId string, payload createPayload) (string, error) {
 	name, err := provider.SnapshotName(payload.SnapshotId)
 	if err != nil || payload.ProjectName == "" || payload.ExternalVmId == "" {

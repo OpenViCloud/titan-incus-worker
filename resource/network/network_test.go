@@ -32,7 +32,7 @@ func createLeased(cidr string) command.Leased {
 
 func createLeasedWithIpv6(cidr string, subnet string, router string) command.Leased {
 	return leased("network.create", map[string]any{
-		"networkId": networkId, "name": "backend", "projectName": project, "cidr": cidr,
+		"networkId": networkId, "requestId": requestId, "name": "backend", "projectName": project, "cidr": cidr,
 		"defaultEgressPolicy": "Allow", "publicIpv6Subnet": subnet, "publicIpv6RouterAddress": router,
 	})
 }
@@ -61,19 +61,6 @@ func ovnUplinkCluster(p *testsupport.Provider, uplink string) cluster.Fixed {
 	return cluster.Fixed{clusterId: {Provider: p, OvnUplinkNetwork: uplink}}
 }
 
-func onlyBody(t *testing.T, cp *testsupport.ControlPlane) map[string]any {
-	t.Helper()
-	requests := cp.RequestsTo("PATCH /internal/networks/" + networkId + "/status")
-	if len(requests) != 1 {
-		t.Fatalf("want one status report, got %+v", cp.Requests())
-	}
-	var body map[string]any
-	if err := json.Unmarshal([]byte(requests[0].Body), &body); err != nil {
-		t.Fatal(err)
-	}
-	return body
-}
-
 func TestRouterAddress_IsTheFirstHostOfTheCidr(t *testing.T) {
 	cases := map[string]Router{
 		"10.40.0.0/24":   {Cidr: "10.40.0.1/24", Gateway: "10.40.0.1"},
@@ -99,8 +86,8 @@ func TestRouterAddress_RefusesWhatCannotHoldARouterAndAVm(t *testing.T) {
 
 func createLeasedWithPolicies(ingress string, egress string) command.Leased {
 	payload := map[string]any{
-		"networkId": networkId, "name": "backend", "projectName": project, "cidr": "10.40.0.0/24",
-		"defaultEgressPolicy": egress,
+		"networkId": networkId, "requestId": requestId, "name": "backend", "projectName": project,
+		"cidr": "10.40.0.0/24", "defaultEgressPolicy": egress,
 	}
 	if ingress != "" {
 		payload["defaultIngressPolicy"] = ingress
@@ -110,7 +97,7 @@ func createLeasedWithPolicies(ingress string, egress string) command.Leased {
 
 // A network without public IPv6 has no uplink, even where the cluster has one: OVN keeps each one to itself and lets two
 // tenants use the same CIDR (titan-ops architecture/vm-network.md#no-ipv4-egress).
-func TestCreate_MakesAnIsolatedOvnNetwork_WithItsAcl_AndReportsCreated(t *testing.T) {
+func TestCreate_MakesAnIsolatedOvnNetwork_WithItsAcl_AndEndsTheRequestDone(t *testing.T) {
 	for _, uplink := range []string{"ovnup", ""} {
 		cp := testsupport.NewControlPlane(t)
 		p := testsupport.NewProvider()
@@ -142,8 +129,11 @@ func TestCreate_MakesAnIsolatedOvnNetwork_WithItsAcl_AndReportsCreated(t *testin
 		if strings.Join(p.Order, ",") != strings.Join(wantOrder, ",") {
 			t.Fatalf("order: want %v, got %v", wantOrder, p.Order)
 		}
-		body := onlyBody(t, cp)
-		if body["report"] != "Created" || body["externalId"] != "net-"+networkId || body["cidr"] != "10.40.0.0/24" || body["gateway"] != "10.40.0.1" {
+		body := requestEnd(t, cp)
+		observed, _ := observedOf(body)
+		isDone := body["outcome"] == "Done" && body["externalId"] == "net-"+networkId &&
+			observed["cidr"] == "10.40.0.0/24" && observed["gateway"] == "10.40.0.1"
+		if !isDone {
 			t.Fatalf("report: %v", body)
 		}
 	}
@@ -178,8 +168,9 @@ func TestCreate_WithPublicIpv6_UsesTheClustersUplink_AndPinsTheRouter(t *testing
 			t.Errorf("%s: want %q, got %q", key, value, created[key])
 		}
 	}
-	body := onlyBody(t, cp)
-	if body["report"] != "Created" || body["externalId"] != "net-"+networkId || body["cidr"] != "10.40.0.0/24" {
+	body := requestEnd(t, cp)
+	observed, _ := observedOf(body)
+	if body["outcome"] != "Done" || body["externalId"] != "net-"+networkId || observed["cidr"] != "10.40.0.0/24" {
 		t.Fatalf("report: %v", body)
 	}
 }
@@ -343,8 +334,8 @@ func TestCreate_WithPublicIpv6_AlreadyOurs_IsCheckedToo(t *testing.T) {
 		if len(p.UpdatedNetworks) != 0 {
 			t.Errorf("%s: rewrote a network that was right: %+v", c.name, p.UpdatedNetworks)
 		}
-		if onlyBody(t, cp)["report"] != "Created" {
-			t.Errorf("%s: want Created", c.name)
+		if requestEnd(t, cp)["outcome"] != "Done" {
+			t.Errorf("%s: want Done", c.name)
 		}
 	}
 }
@@ -411,9 +402,9 @@ func TestCreate_WithoutACidr_ReportsTheSubnetIncusPicked(t *testing.T) {
 	if p.CreatedNetworks[0].Config["ipv4.address"] != "auto" {
 		t.Fatalf("asked for %q, want auto", p.CreatedNetworks[0].Config["ipv4.address"])
 	}
-	body := onlyBody(t, cp)
-	if body["cidr"] != "10.101.0.0/24" || body["gateway"] != "10.101.0.1" {
-		t.Fatalf("report: %v", body)
+	observed, _ := observedOf(requestEnd(t, cp))
+	if observed["cidr"] != "10.101.0.0/24" || observed["gateway"] != "10.101.0.1" {
+		t.Fatalf("observed: %v", observed)
 	}
 }
 
@@ -427,8 +418,9 @@ func TestCreate_GiveUp_WithAnIncusChosenSubnet_ReportsThatSubnet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := onlyBody(t, cp)
-	if body["report"] != "RequestFailed" || body["cidr"] != "10.102.0.0/24" || body["gateway"] != "10.102.0.1" ||
+	body := requestEnd(t, cp)
+	observed, _ := observedOf(body)
+	if body["outcome"] != "Failed" || observed["cidr"] != "10.102.0.0/24" || observed["gateway"] != "10.102.0.1" ||
 		body["reason"] != reasonCreateFailed || body["detail"] != "gave up" {
 		t.Fatalf("report: %v", body)
 	}
@@ -449,8 +441,8 @@ func TestCreate_GiveUp_WithoutTheNetwork_DeletesTheAcl(t *testing.T) {
 	if len(p.ACLs) != 0 {
 		t.Fatal("ACL left behind")
 	}
-	if onlyBody(t, cp)["report"] != "RequestFailed" {
-		t.Fatal("want RequestFailed")
+	if requestEnd(t, cp)["outcome"] != "Failed" {
+		t.Fatal("want Failed")
 	}
 }
 
@@ -468,7 +460,7 @@ func TestCreate_GiveUp_WithTheNetwork_KeepsTheAcl(t *testing.T) {
 	if len(p.ACLs) != 1 || len(p.DeletedACLs) != 0 {
 		t.Fatal("deleted the ACL of a network that exists")
 	}
-	if onlyBody(t, cp)["externalId"] != "net-"+networkId {
+	if requestEnd(t, cp)["externalId"] != "net-"+networkId {
 		t.Fatal("want the network's id")
 	}
 }
@@ -511,8 +503,8 @@ func TestCreate_NetworkAndAclExist_IsOurs_AndTheNetworkGetsItsAclSettings(t *tes
 		updated.Config["security.acls.default.ingress.action"] != "drop" || updated.Config["ipv4.address"] != "10.40.0.1/24" {
 		t.Fatalf("update: %+v", updated.Config)
 	}
-	if onlyBody(t, cp)["report"] != "Created" {
-		t.Fatal("want Created")
+	if requestEnd(t, cp)["outcome"] != "Done" {
+		t.Fatal("want Done")
 	}
 	if got := logs.Objects("already exists; treating it as ours"); len(got) != 2 {
 		t.Fatalf("want 2 line(s) %q, got %v", "already exists; treating it as ours", got)
@@ -568,7 +560,7 @@ func TestCreate_InvalidCidr_IsPermanent(t *testing.T) {
 
 func deleteLeased() command.Leased {
 	return leased("network.delete", map[string]any{
-		"networkId": networkId, "externalNetworkId": "net-" + networkId, "projectName": project,
+		"networkId": networkId, "requestId": requestId, "externalNetworkId": "net-" + networkId, "projectName": project,
 	})
 }
 
@@ -591,12 +583,12 @@ func TestDelete_DeletesTheNetworkThenItsAcl(t *testing.T) {
 	if len(p.ACLs) != 0 {
 		t.Fatal("ACL left behind")
 	}
-	if onlyBody(t, cp)["report"] != "Deleted" {
-		t.Fatal("want Deleted")
+	if requestEnd(t, cp)["outcome"] != "Done" {
+		t.Fatal("want Done")
 	}
 }
 
-func TestDelete_Gone_ReportsDeleted(t *testing.T) {
+func TestDelete_Gone_EndsTheRequestDone(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -607,15 +599,15 @@ func TestDelete_Gone_ReportsDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if onlyBody(t, cp)["report"] != "Deleted" {
-		t.Fatal("want Deleted")
+	if requestEnd(t, cp)["outcome"] != "Done" {
+		t.Fatal("want Done")
 	}
 	if got := logs.Objects("already gone; nothing to delete"); len(got) != 2 {
 		t.Fatalf("want 2 line(s) %q, got %v", "already gone; nothing to delete", got)
 	}
 }
 
-func TestDelete_AclDeleteFails_DoesNotReportDeleted(t *testing.T) {
+func TestDelete_AclDeleteFails_ReportsNothing(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.DeleteACLErr = errors.New("boom")
@@ -630,7 +622,7 @@ func TestDelete_AclDeleteFails_DoesNotReportDeleted(t *testing.T) {
 	}
 }
 
-func TestDelete_GiveUp_ReportsRequestFailed(t *testing.T) {
+func TestDelete_GiveUp_ClusterNotConfigured_EndsTheRequestFailed(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
 	err := NewDelete(cp.Client(), cluster.Fixed{}).GiveUp(context.Background(), deleteLeased(), errors.New("in use"), testsupport.DiscardLogger())
@@ -638,8 +630,8 @@ func TestDelete_GiveUp_ReportsRequestFailed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := onlyBody(t, cp)
-	if body["report"] != "RequestFailed" || body["reason"] != reasonDeleteFailed || body["detail"] != "in use" {
+	body := requestEnd(t, cp)
+	if body["outcome"] != "Failed" || body["reason"] != reasonDeleteFailed || body["detail"] != "in use" {
 		t.Fatalf("report: %v", body)
 	}
 }

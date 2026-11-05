@@ -16,9 +16,6 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
-// The commands here carry no requestId, so their reports are those of the old routes until rollout phase 6
-// (titan-ops architecture/resource-lifecycle.md#rollout); request_test.go has the commands with one.
-
 // Oracle for instanceName: python3 base32 of the UUID, as in provider/names_test.go.
 const instanceName = "vmceircejceiztgrcekvkvkvkvku"
 
@@ -26,8 +23,10 @@ const (
 	vmId      = "11111111-2222-3333-4444-555555555555"
 	project   = "t-0123456789abcdef0123456789abcdef"
 	clusterId = "mock"
-	intentId  = "99999999-8888-7777-6666-555555555555"
+	requestId = "77777777-6666-5555-4444-333333333333"
 )
+
+const requestRoute = "PATCH /internal/vms/" + vmId + "/requests/" + requestId
 
 func clusters(p *testsupport.Provider) cluster.Fixed {
 	return cluster.Fixed{clusterId: {Provider: p, StoragePool: "pool1", OvnUplinkNetwork: "ovnup"}}
@@ -42,7 +41,7 @@ func createLeased(overrides map[string]any) command.Leased {
 	payload := map[string]any{
 		"vmId": vmId, "name": "web-1", "vmOfferingId": "m", "cpuUnits": 1.5, "vcpuCount": 2, "memoryMb": 2048,
 		"templateId": "tpl-abc", "externalNetworkId": "net-1", "projectName": project,
-		"diskSizeGb": 20, "userData": "",
+		"diskSizeGb": 20, "userData": "", "requestId": requestId,
 	}
 	for key, value := range overrides {
 		payload[key] = value
@@ -63,7 +62,7 @@ func onlyBody(t *testing.T, cp *testsupport.ControlPlane, prefix string) map[str
 	return body
 }
 
-func TestCreate_BuildsTheInstance_AndReportsCreatedWithTheInstanceName(t *testing.T) {
+func TestCreate_BuildsTheInstance_AndEndsTheRequestDone_WithTheInstanceName(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
@@ -89,8 +88,8 @@ func TestCreate_BuildsTheInstance_AndReportsCreatedWithTheInstanceName(t *testin
 	if created.Devices["eth0"]["network"] != "net-1" {
 		t.Fatalf("eth0: %v", created.Devices["eth0"])
 	}
-	body := onlyBody(t, cp, "PATCH /internal/vms/"+vmId+"/status")
-	if body["report"] != "Created" || body["externalId"] != instanceName || body["status"] != nil {
+	body := onlyBody(t, cp, requestRoute)
+	if body["outcome"] != "Done" || body["externalId"] != instanceName {
 		t.Fatalf("report: %v", body)
 	}
 }
@@ -161,7 +160,7 @@ func TestCreate_NoVendorData_SetsNoKey(t *testing.T) {
 	}
 }
 
-func TestCreate_InstanceAlreadyExists_IsOurs_AndReportsCreated(t *testing.T) {
+func TestCreate_InstanceAlreadyExists_IsOurs_AndEndsTheRequestDone(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -180,8 +179,8 @@ func TestCreate_InstanceAlreadyExists_IsOurs_AndReportsCreated(t *testing.T) {
 	if len(p.CreatedProjects) != 0 {
 		t.Fatal("created a project that exists")
 	}
-	if onlyBody(t, cp, "PATCH /internal/vms/")["report"] != "Created" {
-		t.Fatal("want Created")
+	if onlyBody(t, cp, requestRoute)["outcome"] != "Done" {
+		t.Fatal("want Done")
 	}
 	if got := logs.Objects("already exists; treating it as ours"); len(got) != 1 {
 		t.Fatalf("want 1 line(s) %q, got %v", "already exists; treating it as ours", got)
@@ -189,7 +188,7 @@ func TestCreate_InstanceAlreadyExists_IsOurs_AndReportsCreated(t *testing.T) {
 }
 
 // An earlier run created the instance and died before it started: the rerun starts it, as the create asked.
-func TestCreate_InstanceAlreadyExistsButStopped_IsStarted_ThenReportsCreated(t *testing.T) {
+func TestCreate_InstanceAlreadyExistsButStopped_IsStarted_ThenEndsTheRequestDone(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -205,8 +204,8 @@ func TestCreate_InstanceAlreadyExistsButStopped_IsStarted_ThenReportsCreated(t *
 	if len(p.StateChanges) != 1 || p.StateChanges[0].Action != "start" {
 		t.Fatalf("state changes: %+v", p.StateChanges)
 	}
-	if onlyBody(t, cp, "PATCH /internal/vms/")["report"] != "Created" {
-		t.Fatal("want Created")
+	if onlyBody(t, cp, requestRoute)["outcome"] != "Done" {
+		t.Fatal("want Done")
 	}
 	if got := logs.Objects("already exists; treating it as ours"); len(got) != 1 {
 		t.Fatalf("want 1 line(s) %q, got %v", "already exists; treating it as ours", got)
@@ -241,15 +240,15 @@ func TestCreate_GiveUp_CarriesTheIdOfAnInstanceThatExists_AndASanitizedReason(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := onlyBody(t, cp, "PATCH /internal/vms/"+vmId+"/status")
-	if body["externalId"] != instanceName || body["reason"] != reasonProvisionFailed || body["detail"] != "raw: pod worker-7 op 42" {
+	body := onlyBody(t, cp, requestRoute)
+	if body["outcome"] != "Failed" || body["externalId"] != instanceName || body["reason"] != reasonProvisionFailed || body["detail"] != "raw: pod worker-7 op 42" {
 		t.Fatalf("give-up: %v", body)
 	}
 }
 
 func actionLeased(kind string) command.Leased {
 	return leased(kind, map[string]any{
-		"vmId": vmId, "intentId": intentId, "externalVmId": instanceName, "projectName": project,
+		"vmId": vmId, "requestId": requestId, "externalVmId": instanceName, "projectName": project,
 	})
 }
 
@@ -361,25 +360,11 @@ func TestStop_InjectedFailure_IsRetryable(t *testing.T) {
 	}
 }
 
-func TestStop_GiveUp_WithdrawsTheIntent(t *testing.T) {
-	cp := testsupport.NewControlPlane(t)
-
-	err := NewStop(cp.Client(), clusters(testsupport.NewProvider())).GiveUp(context.Background(), actionLeased("vm.stop"), errors.New("x"), testsupport.DiscardLogger())
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	requests := cp.RequestsTo("PATCH /internal/vms/" + vmId + "/intents/" + intentId + "/failed")
-	if len(requests) != 1 || requests[0].Body != "" {
-		t.Fatalf("want one bodyless intent-failed callback, got %+v", cp.Requests())
-	}
-}
-
 func deleteLeased() command.Leased {
-	return leased("vm.delete", map[string]any{"vmId": vmId, "externalVmId": instanceName, "projectName": project})
+	return leased("vm.delete", map[string]any{"vmId": vmId, "requestId": requestId, "externalVmId": instanceName, "projectName": project})
 }
 
-func TestDelete_InstanceGone_ReportsDeleted(t *testing.T) {
+func TestDelete_InstanceGone_EndsTheRequestDone(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -392,8 +377,8 @@ func TestDelete_InstanceGone_ReportsDeleted(t *testing.T) {
 	if len(p.DeletedInstances) != 0 {
 		t.Fatal("deleted an instance that is gone")
 	}
-	body := onlyBody(t, cp, "PATCH /internal/vms/"+vmId+"/status")
-	if body["report"] != "Deleted" || body["status"] != nil {
+	body := onlyBody(t, cp, requestRoute)
+	if _, has := body["observed"]; has || body["outcome"] != "Done" {
 		t.Fatalf("report: %v", body)
 	}
 	if got := logs.Objects("already gone; nothing to delete"); len(got) != 1 {
@@ -414,8 +399,8 @@ func TestDelete_RunningInstance_IsStoppedThenDeleted(t *testing.T) {
 	if len(p.StateChanges) != 1 || p.StateChanges[0].Action != "stop" || len(p.DeletedInstances) != 1 {
 		t.Fatalf("want stop then delete, got %+v / %v", p.StateChanges, p.DeletedInstances)
 	}
-	if onlyBody(t, cp, "PATCH /internal/vms/")["report"] != "Deleted" {
-		t.Fatal("want Deleted")
+	if onlyBody(t, cp, requestRoute)["outcome"] != "Done" {
+		t.Fatal("want Done")
 	}
 }
 
@@ -436,7 +421,7 @@ func TestDelete_FrozenInstance_IsStoppedThenDeleted(t *testing.T) {
 	}
 }
 
-func TestDelete_DeleteAnswers404_ReportsDeleted(t *testing.T) {
+func TestDelete_DeleteAnswers404_EndsTheRequestDone(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.Instances[project+"/"+instanceName] = &api.Instance{Name: instanceName, StatusCode: api.Stopped}
@@ -450,8 +435,8 @@ func TestDelete_DeleteAnswers404_ReportsDeleted(t *testing.T) {
 	if len(p.StateChanges) != 0 {
 		t.Fatal("stopped a stopped instance")
 	}
-	if onlyBody(t, cp, "PATCH /internal/vms/")["report"] != "Deleted" {
-		t.Fatal("want Deleted")
+	if onlyBody(t, cp, requestRoute)["outcome"] != "Done" {
+		t.Fatal("want Done")
 	}
 }
 
@@ -507,20 +492,6 @@ func TestDelete_DeleteRefused_IsRetryable_AndReportsNothing(t *testing.T) {
 	}
 	if len(cp.Requests()) != 0 {
 		t.Fatalf("reported while the delete has not happened: %+v", cp.Requests())
-	}
-}
-
-func TestStart_GiveUp_WithdrawsTheIntent(t *testing.T) {
-	cp := testsupport.NewControlPlane(t)
-
-	err := NewStart(cp.Client(), clusters(testsupport.NewProvider())).GiveUp(context.Background(), actionLeased("vm.start"), errors.New("x"), testsupport.DiscardLogger())
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	requests := cp.RequestsTo("PATCH /internal/vms/" + vmId + "/intents/" + intentId + "/failed")
-	if len(requests) != 1 || requests[0].Body != "" {
-		t.Fatalf("want one bodyless intent-failed callback, got %+v", cp.Requests())
 	}
 }
 

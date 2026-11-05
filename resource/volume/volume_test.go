@@ -36,13 +36,14 @@ func leased(kind string, payload map[string]any) command.Leased {
 
 func createLeased() command.Leased {
 	return leased("volume.create", map[string]any{
-		"volumeId": volumeId, "name": "data-1", "sizeGb": 20, "projectName": project,
+		"volumeId": volumeId, "requestId": requestId, "name": "data-1", "sizeGb": 20, "projectName": project,
 	})
 }
 
 func attachLeased(kind string) command.Leased {
 	return leased(kind, map[string]any{
-		"volumeId": volumeId, "externalVolumeId": volumeName, "externalVmId": instance, "projectName": project,
+		"volumeId": volumeId, "requestId": requestId, "externalVolumeId": volumeName, "externalVmId": instance,
+		"projectName": project,
 	})
 }
 
@@ -59,8 +60,6 @@ func onlyBody(t *testing.T, cp *testsupport.ControlPlane, prefix string) map[str
 	return body
 }
 
-const statusPath = "PATCH /internal/volumes/" + volumeId + "/status"
-
 const usedByInstance = "/1.0/instances/" + instance + "?project=" + project
 
 // attachedTo reads a report's instance list; an absent list is no instance.
@@ -73,7 +72,7 @@ func attachedTo(body map[string]any) []string {
 	return names
 }
 
-func TestCreate_MakesTheBlockVolumeInTheTenantsProject_AndReportsCreatedWithItsName(t *testing.T) {
+func TestCreate_MakesTheBlockVolumeInTheTenantsProject_AndEndsTheRequestDoneWithItsName(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
@@ -94,14 +93,14 @@ func TestCreate_MakesTheBlockVolumeInTheTenantsProject_AndReportsCreatedWithItsN
 	if !isAsAsked {
 		t.Fatalf("volume: %+v", created)
 	}
-	body := onlyBody(t, cp, statusPath)
-	if body["report"] != "Created" || body["externalId"] != volumeName {
+	body := requestEnd(t, cp)
+	if body["outcome"] != "Done" || body["externalId"] != volumeName {
 		t.Fatalf("report: %v", body)
 	}
 }
 
 // A second lease of the same create (the first one's lease ran out) finds the volume made: one volume, reported.
-func TestCreate_VolumeAlreadyThere_ReportsCreated(t *testing.T) {
+func TestCreate_VolumeAlreadyThere_EndsTheRequestDone(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -112,9 +111,9 @@ func TestCreate_VolumeAlreadyThere_ReportsCreated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a duplicate must not fail the create: %v", err)
 	}
-	body := onlyBody(t, cp, statusPath)
-	if body["report"] != "Created" || body["externalId"] != volumeName {
-		t.Fatalf("want Created with the volume's name, got %v", body)
+	body := requestEnd(t, cp)
+	if body["outcome"] != "Done" || body["externalId"] != volumeName {
+		t.Fatalf("want Done with the volume's name, got %v", body)
 	}
 	if got := logs.Objects("already exists; treating it as ours"); len(got) != 1 {
 		t.Fatalf("want 1 line(s) %q, got %v", "already exists; treating it as ours", got)
@@ -147,41 +146,13 @@ func TestCreate_PayloadWithoutSize_IsPermanent(t *testing.T) {
 	}
 }
 
-// The tenant reads the fixed reason; the raw error goes to the operator's detail.
-func TestCreate_GiveUp_ReportsRequestFailed_CarryingTheNameOnlyWhenTheVolumeExists(t *testing.T) {
-	for _, exists := range []bool{true, false} {
-		cp := testsupport.NewControlPlane(t)
-		p := testsupport.NewProvider()
-		if exists {
-			p.Volumes[project+"/"+volumeName] = &api.StorageVolume{Name: volumeName}
-		}
-
-		err := NewCreate(cp.Client(), clusters(p, "")).GiveUp(context.Background(), createLeased(), errors.New("raw: lvcreate failed"), testsupport.DiscardLogger())
-
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := onlyBody(t, cp, statusPath)
-		wantId := ""
-		if exists {
-			wantId = volumeName
-		}
-		gotId, _ := body["externalId"].(string)
-		isTheGiveUp := body["report"] == "RequestFailed" && body["reason"] == ReasonCreateFailed &&
-			body["detail"] == "raw: lvcreate failed" && gotId == wantId
-		if !isTheGiveUp {
-			t.Fatalf("exists=%v: report %v", exists, body)
-		}
-	}
-}
-
 func usedVolume(users ...string) *api.StorageVolume {
 	return &api.StorageVolume{Name: volumeName, Type: "custom", Project: project, UsedBy: users}
 }
 
 // The attach reports what Incus then shows: the instances in the volume's used_by, for the control plane to match to
 // its VMs (titan-ops features/volume/design.md#attachment-from-used-by).
-func TestAttach_PatchesADiskNamedAfterTheVolume_InTheClustersPool_AndReportsTheInstancesUsingIt(t *testing.T) {
+func TestAttach_PatchesADiskNamedAfterTheVolume_InTheClustersPool_AndEndsTheRequestWithTheInstancesUsingIt(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.Volumes[project+"/"+volumeName] = usedVolume(usedByInstance)
@@ -198,14 +169,14 @@ func TestAttach_PatchesADiskNamedAfterTheVolume_InTheClustersPool_AndReportsTheI
 	if device["type"] != "disk" || device["source"] != volumeName || device["pool"] != "pool1" || device["path"] != "" {
 		t.Fatalf("device: %v", device)
 	}
-	body := onlyBody(t, cp, statusPath)
-	names := attachedTo(body)
-	if body["report"] != "Observed" || body["exists"] != true || len(names) != 1 || names[0] != instance {
+	body := requestEnd(t, cp)
+	names, observed := observedNames(body)
+	if body["outcome"] != "Done" || !observed || len(names) != 1 || names[0] != instance {
 		t.Fatalf("report: %v", body)
 	}
 }
 
-func TestAttach_VmGone_IsPermanent_AndGiveUpReportsRequestFailed_WithWhatIncusShows(t *testing.T) {
+func TestAttach_VmGone_IsPermanent_AndGiveUpEndsTheRequestFailed_WithWhatIncusShows(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.PatchInstanceErr = testsupport.NotFound("Instance not found")
@@ -220,15 +191,16 @@ func TestAttach_VmGone_IsPermanent_AndGiveUpReportsRequestFailed_WithWhatIncusSh
 		t.Fatal(err)
 	}
 
-	body := onlyBody(t, cp, statusPath)
-	isTheGiveUp := body["report"] == "RequestFailed" && body["reason"] == reasonAttachFailed && body["exists"] == true &&
-		len(attachedTo(body)) == 0 && body["detail"] != nil
+	body := requestEnd(t, cp)
+	names, observed := observedNames(body)
+	isTheGiveUp := body["outcome"] == "Failed" && body["reason"] == reasonAttachFailed && observed && len(names) == 0 &&
+		body["detail"] != nil
 	if !isTheGiveUp {
 		t.Fatalf("report: %v", body)
 	}
 }
 
-func TestDetach_RemovesOnlyThisVolumesDisk_FromTheInstanceUsingIt_AndReportsWhatIncusThenShows(t *testing.T) {
+func TestDetach_RemovesOnlyThisVolumesDisk_FromTheInstanceUsingIt_AndEndsTheRequestWithWhatIncusThenShows(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.Volumes[project+"/"+volumeName] = usedVolume(usedByInstance)
@@ -255,14 +227,14 @@ func TestDetach_RemovesOnlyThisVolumesDisk_FromTheInstanceUsingIt_AndReportsWhat
 	if stillThere || !rootKept || !otherKept {
 		t.Fatalf("devices after detach: %v", devices)
 	}
-	body := onlyBody(t, cp, statusPath)
-	if body["report"] != "Observed" || body["exists"] != true || len(attachedTo(body)) != 0 {
+	body := requestEnd(t, cp)
+	if names, observed := observedNames(body); body["outcome"] != "Done" || !observed || len(names) != 0 {
 		t.Fatalf("report: %v", body)
 	}
 }
 
 // A repeat after the device is gone (lab-storage 04b) changes nothing and reports the same.
-func TestDetach_VolumeUsedByNoInstance_ReportsItUnattachedWithoutAPut(t *testing.T) {
+func TestDetach_VolumeUsedByNoInstance_EndsTheRequestDoneWithoutAPut(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.Volumes[project+"/"+volumeName] = usedVolume()
@@ -272,51 +244,14 @@ func TestDetach_VolumeUsedByNoInstance_ReportsItUnattachedWithoutAPut(t *testing
 	if err != nil || len(p.UpdatedInstances) != 0 {
 		t.Fatalf("err %v, PUTs %+v", err, p.UpdatedInstances)
 	}
-	body := onlyBody(t, cp, statusPath)
-	if body["report"] != "Observed" || body["exists"] != true || len(attachedTo(body)) != 0 {
+	body := requestEnd(t, cp)
+	if names, observed := observedNames(body); body["outcome"] != "Done" || !observed || len(names) != 0 {
 		t.Fatalf("report: %v", body)
 	}
 }
 
-// An attach or detach that happened while its report failed five times: the give-up carries what Incus shows, which
-// the control plane applies before it withdraws anything.
-func TestGiveUps_CarryWhatTheVolumesUsedByShows(t *testing.T) {
-	cases := []struct {
-		kind       string
-		usedBy     []string
-		wantReason string
-		wantNames  int
-	}{
-		{"volume.attach", []string{usedByInstance}, reasonAttachFailed, 1},
-		{"volume.attach", nil, reasonAttachFailed, 0},
-		{"volume.detach", nil, reasonDetachFailed, 0},
-		{"volume.detach", []string{usedByInstance}, reasonDetachFailed, 1},
-	}
-	for _, c := range cases {
-		cp := testsupport.NewControlPlane(t)
-		p := testsupport.NewProvider()
-		p.Volumes[project+"/"+volumeName] = usedVolume(c.usedBy...)
-		var handler command.Handler = NewAttach(cp.Client(), clusters(p, ""))
-		if c.kind == "volume.detach" {
-			handler = NewDetach(cp.Client(), clusters(p, ""))
-		}
-
-		err := handler.GiveUp(context.Background(), attachLeased(c.kind), errors.New("callback refused"), testsupport.DiscardLogger())
-
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := onlyBody(t, cp, statusPath)
-		isTheGiveUp := body["report"] == "RequestFailed" && body["reason"] == c.wantReason &&
-			body["detail"] == "callback refused" && body["exists"] == true && len(attachedTo(body)) == c.wantNames
-		if !isTheGiveUp {
-			t.Errorf("%s with used_by %v: report %v", c.kind, c.usedBy, body)
-		}
-	}
-}
-
 // used_by cannot be read: the give-up says nothing about the attachment, only that the request failed.
-func TestGiveUp_UnreadableVolume_ReportsTheFailureAlone(t *testing.T) {
+func TestGiveUp_UnreadableVolume_EndsTheRequestFailed_WithoutAnObservation(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.GetVolumeErr = errors.New("connection refused")
@@ -326,24 +261,8 @@ func TestGiveUp_UnreadableVolume_ReportsTheFailureAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := onlyBody(t, cp, statusPath)
-	_, carriesExists := body["exists"]
-	if body["report"] != "RequestFailed" || carriesExists {
-		t.Fatalf("report: %v", body)
-	}
-}
-
-// The volume is gone: the give-up says so, and the control plane records NotFound.
-func TestGiveUp_VolumeGone_ReportsItNotFound(t *testing.T) {
-	cp := testsupport.NewControlPlane(t)
-
-	err := NewDetach(cp.Client(), clusters(testsupport.NewProvider(), "")).GiveUp(context.Background(), attachLeased("volume.detach"), errors.New("x"), testsupport.DiscardLogger())
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := onlyBody(t, cp, statusPath)
-	if body["report"] != "RequestFailed" || body["exists"] != false {
+	body := requestEnd(t, cp)
+	if _, observed := observedNames(body); body["outcome"] != "Failed" || observed {
 		t.Fatalf("report: %v", body)
 	}
 }
@@ -364,11 +283,11 @@ func TestInstancesUsing_ReadsInstancesAndTheirProject_SkipsEverythingElse(t *tes
 
 func deleteLeased() command.Leased {
 	return leased("volume.delete", map[string]any{
-		"volumeId": volumeId, "externalVolumeId": volumeName, "projectName": project,
+		"volumeId": volumeId, "requestId": requestId, "externalVolumeId": volumeName, "projectName": project,
 	})
 }
 
-func TestDelete_VolumeAlreadyGone_ReportsDeleted(t *testing.T) {
+func TestDelete_VolumeAlreadyGone_EndsTheRequestDone(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -376,7 +295,7 @@ func TestDelete_VolumeAlreadyGone_ReportsDeleted(t *testing.T) {
 
 	err := NewDelete(cp.Client(), clusters(p, "")).Run(context.Background(), deleteLeased(), logger)
 
-	if err != nil || onlyBody(t, cp, statusPath)["report"] != "Deleted" {
+	if err != nil || requestEnd(t, cp)["outcome"] != "Done" {
 		t.Fatalf("err %v", err)
 	}
 	if got := logs.Objects("already gone; nothing to delete"); len(got) != 1 {
@@ -384,7 +303,7 @@ func TestDelete_VolumeAlreadyGone_ReportsDeleted(t *testing.T) {
 	}
 }
 
-func TestDelete_StillInUse_IsRetried_AndGiveUpReportsRequestFailed(t *testing.T) {
+func TestDelete_StillInUse_IsRetried_AndGiveUpEndsTheRequestFailed(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.DeleteVolumeErr = api.StatusErrorf(http.StatusBadRequest, "The storage volume is still in use")
@@ -401,8 +320,8 @@ func TestDelete_StillInUse_IsRetried_AndGiveUpReportsRequestFailed(t *testing.T)
 		t.Fatal(err)
 	}
 
-	body := onlyBody(t, cp, statusPath)
-	if body["report"] != "RequestFailed" || body["reason"] != reasonDeleteFailed || body["detail"] != "still in use" {
+	body := requestEnd(t, cp)
+	if body["outcome"] != "Failed" || body["reason"] != reasonDeleteFailed || body["detail"] != "still in use" {
 		t.Fatalf("report: %v", body)
 	}
 }
@@ -446,7 +365,7 @@ func TestDecideVolumeReport(t *testing.T) {
 		if !send {
 			continue
 		}
-		isAsWanted := report.Report == "Observed" && report.Exists != nil && *report.Exists == c.wantExist &&
+		isAsWanted := report.Exists == c.wantExist &&
 			strings.Join(report.AttachedTo, ",") == strings.Join(c.wantNames, ",")
 		if !isAsWanted {
 			t.Errorf("%s: report %+v", c.name, report)
@@ -478,7 +397,7 @@ func TestDecideSnapshotReport(t *testing.T) {
 			t.Errorf("%s: send %v, want %v", c.name, send, c.wantSend)
 			continue
 		}
-		if send && (report.Report != "Observed" || report.Exists == nil || *report.Exists != c.wantExist) {
+		if send && report.Exists != c.wantExist {
 			t.Errorf("%s: report %+v", c.name, report)
 		}
 	}

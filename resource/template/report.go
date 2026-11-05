@@ -9,35 +9,12 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/controlplane"
 )
 
-// The reports of the old route, which UpdateTemplateStatusCommandHandler maps onto the waiting sync until rollout
-// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout). Incus has no status word for an image alias
-// (titan-ops features/catalog/design.md#template-state-is-existence). A template is never deleted, so there is no
-// Deleted report; the reconciler's observations use the observation route.
-const (
-	reportCreated       = "Created"
-	reportRequestFailed = "RequestFailed"
-)
-
 // The fixed reasons of a give-up, one per cause an operator acts on differently; the raw error goes to the detail.
 const (
 	reasonWrongArchitecture = "The image server has no VM image of this cluster's architecture."
 	reasonNoCluster         = "The cluster is not configured."
 	reasonSyncFailed        = "Template sync failed due to a system error."
 )
-
-// statusReport is the body of the old PATCH /internal/templates/{templateId}/status, which a command without a request
-// id still uses; clusterId is required.
-type statusReport struct {
-	Report     string `json:"report"`
-	ClusterId  string `json:"clusterId"`
-	ExternalId string `json:"externalId,omitempty"`
-	Reason     string `json:"reason,omitempty"`
-	Detail     string `json:"detail,omitempty"`
-}
-
-func sendStatus(ctx context.Context, cp *controlplane.Client, templateId string, report statusReport) error {
-	return cp.Patch(ctx, templatePath(templateId)+"/status", report)
-}
 
 // RequestEnd is the body of PATCH /internal/templates/{templateId}/clusters/{clusterId}/requests/{requestId}: the
 // report that ends the sync request a command carries (titan-ops architecture/resource-lifecycle.md#callback-routes).
@@ -66,7 +43,8 @@ func endRequest(ctx context.Context, cp *controlplane.Client, templateId string,
 }
 
 // ObservationBody is the body of PATCH /internal/templates/{templateId}/clusters/{clusterId}/observation: whether the
-// cluster has the alias (titan-ops architecture/desired-and-current.md#existence-axis).
+// cluster has the alias, all Incus shows of one (titan-ops features/catalog/design.md#template-state-is-existence,
+// titan-ops architecture/desired-and-current.md#existence-axis).
 type ObservationBody struct {
 	Exists bool `json:"exists"`
 }

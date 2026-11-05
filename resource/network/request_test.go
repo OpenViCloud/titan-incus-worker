@@ -18,14 +18,13 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
-// A command that carries a requestId ends that request on its own route
+// A command ends the request it carries on that request's route
 // (titan-ops architecture/resource-lifecycle.md#callback-routes): Done with what the worker read of the network, Failed
-// with a fixed reason and the raw error as detail. network_test.go keeps the commands without one, on the old route.
+// with a fixed reason and the raw error as detail.
 
 const requestId = "77777777-6666-5555-4444-333333333333"
 
 const (
-	statusRoute      = "PATCH /internal/networks/" + networkId + "/status"
 	requestRoute     = "PATCH /internal/networks/" + networkId + "/requests/" + requestId
 	observationRoute = "PATCH /internal/networks/" + networkId + "/observation"
 	networkName      = "net-" + networkId
@@ -45,10 +44,14 @@ func newDelete(cp *testsupport.ControlPlane, p *testsupport.Provider) *Delete {
 	return NewDelete(cp.Client(), cluster.Fixed{clusterId: {Provider: p}})
 }
 
-func withRequest(l command.Leased) command.Leased {
+// withoutRequest drops the payload's requestId, or sets it empty.
+func withoutRequest(l command.Leased, keyAbsent bool) command.Leased {
 	var payload map[string]any
 	_ = json.Unmarshal(l.Payload, &payload)
-	payload["requestId"] = requestId
+	delete(payload, "requestId")
+	if !keyAbsent {
+		payload["requestId"] = ""
+	}
 	return leased(l.Kind, payload)
 }
 
@@ -65,20 +68,14 @@ func bodyOn(t *testing.T, cp *testsupport.ControlPlane, route string) map[string
 	return body
 }
 
-// requestEnd reads the one report on the request route, and checks nothing went to the old one.
+// requestEnd reads the one report on the request route.
 func requestEnd(t *testing.T, cp *testsupport.ControlPlane) map[string]any {
 	t.Helper()
-	if len(cp.RequestsTo(statusRoute)) != 0 {
-		t.Fatalf("a command with a requestId used the old route: %+v", cp.Requests())
-	}
 	return bodyOn(t, cp, requestRoute)
 }
 
 func observationBody(t *testing.T, cp *testsupport.ControlPlane) map[string]any {
 	t.Helper()
-	if len(cp.RequestsTo(statusRoute)) != 0 {
-		t.Fatalf("the reconciler used the old route: %+v", cp.Requests())
-	}
 	return bodyOn(t, cp, observationRoute)
 }
 
@@ -97,7 +94,7 @@ func TestCreate_WithARequest_EndsItDone_WithTheNameTheSubnetAndTheStatus(t *test
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := runCommand(quickCreate(cp, p), withRequest(createLeased("10.40.0.0/24")))
+	err := runCommand(quickCreate(cp, p), createLeased("10.40.0.0/24"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +115,7 @@ func TestCreate_WithARequest_WaitsWhileTheNetworkIsPending_ThenEndsItDone_WithTh
 	p := testsupport.NewProvider()
 	p.NetworkStatuses = []string{"Pending", "Pending", "Created"}
 
-	err := runCommand(quickCreate(cp, p), withRequest(createLeased("10.40.0.0/24")))
+	err := runCommand(quickCreate(cp, p), createLeased("10.40.0.0/24"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +135,7 @@ func TestCreate_WithARequest_StillPendingWhenTheWaitRunsOut_EndsItDone_Pending(t
 	h := quickCreate(cp, p)
 	h.settling = Settling{Every: time.Millisecond, Within: 20 * time.Millisecond}
 
-	err := h.Run(context.Background(), withRequest(createLeased("10.40.0.0/24")), testsupport.DiscardLogger())
+	err := h.Run(context.Background(), createLeased("10.40.0.0/24"), testsupport.DiscardLogger())
 
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +152,7 @@ func TestCreate_WithARequest_StatusReadFails_IsRetryable_AndReportsNothing(t *te
 	p := testsupport.NewProvider()
 	p.GetNetworkErr = errors.New("incus unreachable")
 
-	err := runCommand(quickCreate(cp, p), withRequest(createLeased("10.40.0.0/24")))
+	err := runCommand(quickCreate(cp, p), createLeased("10.40.0.0/24"))
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -171,7 +168,7 @@ func TestCreate_WithARequest_WithoutACidr_EndsItDone_WithTheSubnetIncusPicked(t 
 	p.Networks = []api.Network{{Name: networkName, Project: project, Status: "Created",
 		NetworkPut: api.NetworkPut{Config: map[string]string{"ipv4.address": "10.101.0.1/24"}}}}
 
-	err := runCommand(quickCreate(cp, p), withRequest(createLeased("")))
+	err := runCommand(quickCreate(cp, p), createLeased(""))
 
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +189,7 @@ func TestCreate_WithARequest_GiveUp_EndsItFailed_CarryingTheNetworkOnlyWhenItExi
 			p.Networks = []api.Network{{Name: networkName, Project: project}}
 		}
 
-		err := giveUpCommand(quickCreate(cp, p), withRequest(createLeased("10.40.0.0/24")), errors.New("gave up"))
+		err := giveUpCommand(quickCreate(cp, p), createLeased("10.40.0.0/24"), errors.New("gave up"))
 
 		if err != nil {
 			t.Fatal(err)
@@ -215,7 +212,7 @@ func TestCreate_WithARequest_GiveUp_CannotListNetworks_IsRetryable_AndReportsNot
 	p := testsupport.NewProvider()
 	p.ListNetworksErr = errors.New("incus unreachable")
 
-	err := giveUpCommand(quickCreate(cp, p), withRequest(createLeased("10.40.0.0/24")), errors.New("gave up"))
+	err := giveUpCommand(quickCreate(cp, p), createLeased("10.40.0.0/24"), errors.New("gave up"))
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -229,7 +226,7 @@ func TestDelete_WithARequest_EndsItDone_WithoutAnObservation(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := runCommand(newDelete(cp, p), withRequest(deleteLeased()))
+	err := runCommand(newDelete(cp, p), deleteLeased())
 
 	if err != nil {
 		t.Fatal(err)
@@ -250,7 +247,7 @@ func TestDelete_WithARequest_GiveUp_IsDone_WhenIncusNoLongerHasTheNetworkNorItsA
 			p.Networks = []api.Network{{Name: networkName, Project: project}}
 		}
 
-		err := giveUpCommand(newDelete(cp, p), withRequest(deleteLeased()), errors.New("in use"))
+		err := giveUpCommand(newDelete(cp, p), deleteLeased(), errors.New("in use"))
 
 		if err != nil {
 			t.Fatal(err)
@@ -271,7 +268,7 @@ func TestDelete_WithARequest_GiveUp_NetworkGone_DeletesItsAcl_AndIsDone(t *testi
 	aclKey := project + "/" + provider.NetworkAclName(networkId)
 	p.ACLs = map[string]*api.NetworkACL{aclKey: {}}
 
-	err := giveUpCommand(newDelete(cp, p), withRequest(deleteLeased()), errors.New("acl in use"))
+	err := giveUpCommand(newDelete(cp, p), deleteLeased(), errors.New("acl in use"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -290,7 +287,7 @@ func TestDelete_WithARequest_GiveUp_NetworkGoneButItsAclDeleteFails_IsFailed(t *
 	p := testsupport.NewProvider()
 	p.DeleteACLErr = errors.New("acl in use")
 
-	err := giveUpCommand(newDelete(cp, p), withRequest(deleteLeased()), errors.New("delete kept failing"))
+	err := giveUpCommand(newDelete(cp, p), deleteLeased(), errors.New("delete kept failing"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -306,7 +303,7 @@ func TestDelete_WithARequest_GiveUp_NetworkReadFails_IsRetryable_AndReportsNothi
 	p := testsupport.NewProvider()
 	p.GetNetworkErr = errors.New("incus unreachable")
 
-	err := giveUpCommand(newDelete(cp, p), withRequest(deleteLeased()), errors.New("in use"))
+	err := giveUpCommand(newDelete(cp, p), deleteLeased(), errors.New("in use"))
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -322,7 +319,7 @@ func TestGiveUp_WithARequest_CutsTheDetailAt1000Runes_NotBytes(t *testing.T) {
 	p.Networks = []api.Network{{Name: networkName, Project: project}}
 	long := strings.Repeat("é", controlplane.MaxDetail+10)
 
-	err := giveUpCommand(newDelete(cp, p), withRequest(deleteLeased()), errors.New(long))
+	err := giveUpCommand(newDelete(cp, p), deleteLeased(), errors.New(long))
 
 	if err != nil {
 		t.Fatal(err)
@@ -333,40 +330,44 @@ func TestGiveUp_WithARequest_CutsTheDetailAt1000Runes_NotBytes(t *testing.T) {
 	}
 }
 
-// A command the old control plane enqueued without a requestId keeps the old route until rollout phase 6
-// (titan-ops architecture/resource-lifecycle.md#rollout).
-func TestCommands_WithoutARequest_ReportOnTheOldRoute(t *testing.T) {
+// The control plane puts a requestId in every command: one without it is malformed, and has nothing to end.
+func TestCommands_WithoutARequest_FailForGood_AndCallNothing(t *testing.T) {
 	cases := []struct {
 		name string
-		run  func(cp *testsupport.ControlPlane, p *testsupport.Provider) error
+		h    func(cp *testsupport.ControlPlane, p *testsupport.Provider) command.Handler
+		l    command.Leased
 	}{
-		{"create", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return runCommand(quickCreate(cp, p), createLeased("10.40.0.0/24"))
-		}},
-		{"create give-up", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return giveUpCommand(quickCreate(cp, p), createLeased("10.40.0.0/24"), errors.New("x"))
-		}},
-		{"delete", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return runCommand(newDelete(cp, p), deleteLeased())
-		}},
-		{"delete give-up", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return giveUpCommand(newDelete(cp, p), deleteLeased(), errors.New("x"))
-		}},
+		{"create", func(cp *testsupport.ControlPlane, p *testsupport.Provider) command.Handler {
+			return quickCreate(cp, p)
+		}, createLeased("10.40.0.0/24")},
+		{"delete", func(cp *testsupport.ControlPlane, p *testsupport.Provider) command.Handler {
+			return newDelete(cp, p)
+		}, deleteLeased()},
 	}
 	for _, c := range cases {
-		cp := testsupport.NewControlPlane(t)
+		for _, keyAbsent := range []bool{true, false} {
+			l := withoutRequest(c.l, keyAbsent)
+			cp := testsupport.NewControlPlane(t)
+			p := testsupport.NewProvider()
+			p.Networks = []api.Network{{Name: networkName, Project: project}}
 
-		if err := c.run(cp, testsupport.NewProvider()); err != nil {
-			t.Fatalf("%s: %v", c.name, err)
-		}
-		requestRoutes := cp.RequestsTo("PATCH /internal/networks/" + networkId + "/requests/")
-		if len(cp.RequestsTo(statusRoute)) != 1 || len(requestRoutes) != 0 {
-			t.Errorf("%s: reports %+v", c.name, cp.Requests())
+			runErr := runCommand(c.h(cp, p), l)
+			giveUpErr := giveUpCommand(c.h(cp, p), l, errors.New("x"))
+
+			if runErr == nil || command.IsRetryable(runErr) {
+				t.Errorf("%s, key absent %v: run wants permanent, got %v", c.name, keyAbsent, runErr)
+			}
+			if giveUpErr != nil {
+				t.Errorf("%s, key absent %v: give-up: %v", c.name, keyAbsent, giveUpErr)
+			}
+			if len(cp.Requests()) != 0 || p.Calls != 0 {
+				t.Errorf("%s, key absent %v: reports %+v, Incus calls %d", c.name, keyAbsent, cp.Requests(), p.Calls)
+			}
 		}
 	}
 }
 
-func TestReconcile_SendsOnTheObservationRoute_NeverTheOldOne(t *testing.T) {
+func TestReconcile_SendsOnTheObservationRoute(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	cp.Respond(http.MethodGet, "/internal/reconcile/networks?clusterId=mock", http.StatusOK,
 		`[{"id":"`+networkId+`","externalId":"net-a","currentState":"Pending","currentExistence":"Exists"}]`)

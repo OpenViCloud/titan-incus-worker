@@ -18,8 +18,7 @@ import (
 type restorePayload struct {
 	SnapshotId  string `json:"snapshotId"`
 	NewVolumeId string `json:"newVolumeId"`
-	// RequestId is the new volume's create request (titan-ops architecture/resource-lifecycle.md#kinds); empty on a
-	// command of the old control plane, which keeps the old reporting until rollout phase 6.
+	// RequestId is the new volume's create request (titan-ops architecture/resource-lifecycle.md#kinds).
 	RequestId          string `json:"requestId"`
 	ExternalSnapshotId string `json:"externalSnapshotId"`
 	Name               string `json:"name"`
@@ -42,9 +41,9 @@ func (h *Restore) Run(ctx context.Context, leased command.Leased, logger *slog.L
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	isComplete := payload.NewVolumeId != "" && payload.ExternalSnapshotId != "" && payload.ProjectName != ""
+	isComplete := payload.NewVolumeId != "" && payload.RequestId != "" && payload.ExternalSnapshotId != "" && payload.ProjectName != ""
 	if !isComplete {
-		return command.Permanent(fmt.Errorf("volume-snapshot.restore payload lacks newVolumeId, externalSnapshotId or projectName"))
+		return command.Permanent(fmt.Errorf("volume-snapshot.restore payload lacks newVolumeId, requestId, externalSnapshotId or projectName"))
 	}
 	name, err := provider.VolumeName(payload.NewVolumeId)
 	if err != nil {
@@ -71,11 +70,8 @@ func (h *Restore) Run(ctx context.Context, leased command.Leased, logger *slog.L
 	if isOurs {
 		logger.Info("already exists; treating it as ours", "object", name)
 	}
-	if payload.RequestId != "" {
-		observed := volume.ReadObservation(ctx, cl.Provider, payload.ProjectName, pool, name, logger)
-		return volume.EndRequest(ctx, h.cp, payload.NewVolumeId, payload.RequestId, volume.Done(name, observed))
-	}
-	return volume.SendStatus(ctx, h.cp, payload.NewVolumeId, volume.StatusReport{Report: volume.ReportCreated, ExternalId: name})
+	observed := volume.ReadObservation(ctx, cl.Provider, payload.ProjectName, pool, name, logger)
+	return volume.EndRequest(ctx, h.cp, payload.NewVolumeId, payload.RequestId, volume.Done(name, observed))
 }
 
 func (h *Restore) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
@@ -83,11 +79,11 @@ func (h *Restore) GiveUp(ctx context.Context, leased command.Leased, cause error
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	existing := volume.ExistingVolume(ctx, h.clusters, leased.ClusterId, payload.ProjectName, payload.NewVolumeId)
-	if payload.RequestId != "" {
-		end := volume.Failed(existing, nil, volume.ReasonCreateFailed, cause)
-		return volume.EndRequest(ctx, h.cp, payload.NewVolumeId, payload.RequestId, end)
+	if payload.RequestId == "" {
+		logger.Warn("no request id; nothing to end")
+		return nil
 	}
-	report := volume.StatusReport{Report: volume.ReportRequestFailed, Reason: volume.ReasonCreateFailed, Detail: cause.Error(), ExternalId: existing}
-	return volume.SendStatus(ctx, h.cp, payload.NewVolumeId, report)
+	existing := volume.ExistingVolume(ctx, h.clusters, leased.ClusterId, payload.ProjectName, payload.NewVolumeId)
+	end := volume.Failed(existing, nil, volume.ReasonCreateFailed, cause)
+	return volume.EndRequest(ctx, h.cp, payload.NewVolumeId, payload.RequestId, end)
 }

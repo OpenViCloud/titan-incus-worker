@@ -14,8 +14,6 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
-// The commands here carry no requestId, so they report on the old route; request_test.go has the ones that do.
-
 const (
 	snapshotId = "11111111-2222-3333-4444-555555555555"
 	// Oracle: python3 base32 of snapshotId, as in provider/names_test.go.
@@ -25,8 +23,6 @@ const (
 	project      = "t-0123456789abcdef0123456789abcdef"
 	clusterId    = "mock"
 )
-
-const statusPath = "PATCH /internal/vms/" + vmId + "/snapshots/" + snapshotId + "/status"
 
 func clusters(p *testsupport.Provider) cluster.Fixed {
 	return cluster.Fixed{clusterId: {Provider: p}}
@@ -52,17 +48,17 @@ func onlyBody(t *testing.T, cp *testsupport.ControlPlane, prefix string) map[str
 
 func createLeased() command.Leased {
 	return leased("vm-snapshot.create", map[string]any{
-		"snapshotId": snapshotId, "vmId": vmId, "externalVmId": instance, "name": "before-upgrade", "projectName": project,
+		"snapshotId": snapshotId, "requestId": requestId, "vmId": vmId, "externalVmId": instance, "name": "before-upgrade", "projectName": project,
 	})
 }
 
 func snapshotLeased(kind string) command.Leased {
 	return leased(kind, map[string]any{
-		"snapshotId": snapshotId, "vmId": vmId, "externalSnapshotId": instance + "/" + snapshotName, "projectName": project,
+		"snapshotId": snapshotId, "requestId": requestId, "vmId": vmId, "externalSnapshotId": instance + "/" + snapshotName, "projectName": project,
 	})
 }
 
-func TestCreate_SnapshotsTheInstanceUnderTitansName_AndReportsCreatedWithInstanceSlashSnapshot(t *testing.T) {
+func TestCreate_SnapshotsTheInstanceUnderTitansName_AndEndsTheRequestDoneWithInstanceSlashSnapshot(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
@@ -74,14 +70,14 @@ func TestCreate_SnapshotsTheInstanceUnderTitansName_AndReportsCreatedWithInstanc
 	if !p.InstanceSnapshots[project+"/"+instance+"/"+snapshotName] || len(p.InstanceSnapshots) != 1 {
 		t.Fatalf("snapshots: %v", p.InstanceSnapshots)
 	}
-	body := onlyBody(t, cp, statusPath)
-	if body["report"] != "Created" || body["externalId"] != instance+"/"+snapshotName {
+	body := requestEnd(t, cp)
+	if body["outcome"] != "Done" || body["externalId"] != instance+"/"+snapshotName {
 		t.Fatalf("report: %v", body)
 	}
 }
 
 // A duplicate instance snapshot fails in its operation (lab-storage 05), not with a 409: still ours, still created.
-func TestCreate_SnapshotAlreadyThere_ReportsCreated(t *testing.T) {
+func TestCreate_SnapshotAlreadyThere_EndsTheRequestDone(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -96,8 +92,8 @@ func TestCreate_SnapshotAlreadyThere_ReportsCreated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a duplicate must not fail the create: %v", err)
 	}
-	if onlyBody(t, cp, statusPath)["report"] != "Created" {
-		t.Fatal("want Created")
+	if body := requestEnd(t, cp); body["outcome"] != "Done" || body["externalId"] != providerId {
+		t.Fatalf("report: %v", body)
 	}
 	if got := logs.Objects("already exists; treating it as ours"); len(got) != 1 {
 		t.Fatalf("want 1 line(s) %q, got %v", "already exists; treating it as ours", got)
@@ -118,7 +114,7 @@ func TestCreate_OtherOperationFailure_FailsTheRun(t *testing.T) {
 
 // The tenant reads the fixed reason; the raw error goes to the operator's detail
 // (titan-ops architecture/desired-and-current.md#request-failure).
-func TestGiveUps_ReportRequestFailedWithAFixedReason_AndTheRawErrorAsDetail(t *testing.T) {
+func TestGiveUps_EndTheRequestFailedWithAFixedReason_AndTheRawErrorAsDetail(t *testing.T) {
 	cases := []struct {
 		handler func(cp *testsupport.ControlPlane) command.Handler
 		leased  command.Leased
@@ -133,7 +129,10 @@ func TestGiveUps_ReportRequestFailedWithAFixedReason_AndTheRawErrorAsDetail(t *t
 		},
 			snapshotLeased("vm-snapshot.revert"), reasonRevertFailed},
 		{func(cp *testsupport.ControlPlane) command.Handler {
-			return NewDelete(cp.Client(), clusters(testsupport.NewProvider()))
+			// Incus still has the snapshot: one gone would end the delete Done.
+			p := testsupport.NewProvider()
+			p.InstanceSnapshots[snapshotKey] = true
+			return NewDelete(cp.Client(), clusters(p))
 		},
 			snapshotLeased("vm-snapshot.delete"), reasonDeleteFailed},
 	}
@@ -142,8 +141,8 @@ func TestGiveUps_ReportRequestFailedWithAFixedReason_AndTheRawErrorAsDetail(t *t
 
 		err := c.handler(cp).GiveUp(context.Background(), c.leased, errors.New("raw: lvcreate exit status 5"), testsupport.DiscardLogger())
 
-		body := onlyBody(t, cp, statusPath)
-		isTheGiveUp := body["report"] == "RequestFailed" && body["reason"] == c.reason &&
+		body := requestEnd(t, cp)
+		isTheGiveUp := body["outcome"] == "Failed" && body["reason"] == c.reason &&
 			body["detail"] == "raw: lvcreate exit status 5"
 		if err != nil || !isTheGiveUp {
 			t.Errorf("%s: err %v, report %v", c.leased.Kind, err, body)
@@ -151,35 +150,8 @@ func TestGiveUps_ReportRequestFailedWithAFixedReason_AndTheRawErrorAsDetail(t *t
 	}
 }
 
-// The create's give-up carries the id when Incus has the snapshot: then the create did happen, and a delete of it
-// reaches Incus (titan-ops features/vm/design.md#vm-snapshot-reports).
-func TestCreate_GiveUp_CarriesTheIdOnlyWhenTheSnapshotExists(t *testing.T) {
-	for _, exists := range []bool{true, false} {
-		cp := testsupport.NewControlPlane(t)
-		p := testsupport.NewProvider()
-		if exists {
-			p.InstanceSnapshots[project+"/"+instance+"/"+snapshotName] = true
-		}
-
-		err := NewCreate(cp.Client(), clusters(p)).GiveUp(context.Background(), createLeased(), errors.New("raw"), testsupport.DiscardLogger())
-
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := onlyBody(t, cp, statusPath)
-		wantId := ""
-		if exists {
-			wantId = instance + "/" + snapshotName
-		}
-		gotId, _ := body["externalId"].(string)
-		if body["report"] != "RequestFailed" || gotId != wantId {
-			t.Fatalf("exists=%v: report %v", exists, body)
-		}
-	}
-}
-
 // Disk only: a full restore also puts back the snapshot's devices, attaching or detaching volumes behind Titan's back.
-func TestRevert_RestoresTheSnapshotsDiskOnly_AndReportsReverted(t *testing.T) {
+func TestRevert_RestoresTheSnapshotsDiskOnly_AndEndsTheRequestDone(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
@@ -191,24 +163,12 @@ func TestRevert_RestoresTheSnapshotsDiskOnly_AndReportsReverted(t *testing.T) {
 	if len(p.UpdatedInstances) != 1 || p.UpdatedInstances[0].Restore != snapshotName || !p.UpdatedInstances[0].DiskOnly {
 		t.Fatalf("updates: %+v", p.UpdatedInstances)
 	}
-	if onlyBody(t, cp, statusPath)["report"] != "Reverted" {
-		t.Fatal("want Reverted")
+	if body := requestEnd(t, cp); body["outcome"] != "Done" || len(body) != 1 {
+		t.Fatalf("report: %v", body)
 	}
 }
 
-func TestRevert_VmGone_IsPermanent(t *testing.T) {
-	cp := testsupport.NewControlPlane(t)
-	p := testsupport.NewProvider()
-	p.UpdateInstanceErr = testsupport.NotFound("Instance not found")
-
-	err := NewRevert(cp.Client(), clusters(p)).Run(context.Background(), snapshotLeased("vm-snapshot.revert"), testsupport.DiscardLogger())
-
-	if err == nil || command.IsRetryable(err) {
-		t.Fatalf("want a permanent error, got %v", err)
-	}
-}
-
-func TestDelete_SnapshotThereOrGone_ReportsDeleted(t *testing.T) {
+func TestDelete_SnapshotThereOrGone_EndsTheRequestDone(t *testing.T) {
 	for _, exists := range []bool{true, false} {
 		cp := testsupport.NewControlPlane(t)
 		logger, logs := testsupport.NewLogCapture(t)
@@ -222,8 +182,8 @@ func TestDelete_SnapshotThereOrGone_ReportsDeleted(t *testing.T) {
 		if err != nil || len(p.InstanceSnapshots) != 0 {
 			t.Fatalf("exists=%v: err %v, left %v", exists, err, p.InstanceSnapshots)
 		}
-		if onlyBody(t, cp, statusPath)["report"] != "Deleted" {
-			t.Fatalf("exists=%v: want Deleted", exists)
+		if body := requestEnd(t, cp); body["outcome"] != "Done" || len(body) != 1 {
+			t.Fatalf("exists=%v: report %v", exists, body)
 		}
 		wantGoneLines := 0
 		if !exists {
@@ -235,7 +195,7 @@ func TestDelete_SnapshotThereOrGone_ReportsDeleted(t *testing.T) {
 	}
 }
 
-func TestDelete_VmGone_ReportsDeleted(t *testing.T) {
+func TestDelete_VmGone_EndsTheRequestDone(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -243,8 +203,8 @@ func TestDelete_VmGone_ReportsDeleted(t *testing.T) {
 
 	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), snapshotLeased("vm-snapshot.delete"), logger)
 
-	if err != nil || onlyBody(t, cp, statusPath)["report"] != "Deleted" {
-		t.Fatalf("err %v", err)
+	if body := requestEnd(t, cp); err != nil || body["outcome"] != "Done" {
+		t.Fatalf("err %v, report %v", err, body)
 	}
 	if got := logs.Objects("already gone; nothing to delete"); len(got) != 1 {
 		t.Fatalf("want 1 line(s) %q, got %v", "already gone; nothing to delete", got)

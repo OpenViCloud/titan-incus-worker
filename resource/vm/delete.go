@@ -16,17 +16,14 @@ import (
 const forceStopTimeoutSeconds = 30
 
 type deletePayload struct {
-	VmId string `json:"vmId"`
-	// Empty on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
-	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	VmId         string `json:"vmId"`
 	RequestId    string `json:"requestId"`
 	ExternalVmId string `json:"externalVmId"`
 	ProjectName  string `json:"projectName"`
 }
 
 // Delete runs vm.delete and ends the request it names once Incus no longer has the instance
-// (titan-ops architecture/desired-and-current.md#forget-on-provider-confirm), Failed when it gives up. A command without
-// a request id reports Deleted on success and nothing on giving up.
+// (titan-ops architecture/desired-and-current.md#forget-on-provider-confirm), Failed when it gives up.
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -41,9 +38,9 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	isComplete := payload.VmId != "" && payload.ExternalVmId != "" && payload.ProjectName != ""
+	isComplete := payload.VmId != "" && payload.RequestId != "" && payload.ExternalVmId != "" && payload.ProjectName != ""
 	if !isComplete {
-		return command.Permanent(fmt.Errorf("vm.delete payload lacks vmId, externalVmId or projectName"))
+		return command.Permanent(fmt.Errorf("vm.delete payload lacks vmId, requestId, externalVmId or projectName"))
 	}
 	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
@@ -51,9 +48,6 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	}
 	if err := removeInstance(ctx, cl.Provider, payload.ProjectName, payload.ExternalVmId, logger); err != nil {
 		return err
-	}
-	if payload.RequestId == "" {
-		return sendStatus(ctx, h.cp, payload.VmId, statusReport{Report: reportDeleted})
 	}
 	return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, requestEnd{Outcome: controlplane.OutcomeDone})
 }
@@ -64,6 +58,7 @@ func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error,
 		return err
 	}
 	if payload.RequestId == "" {
+		logger.Warn("no request id; nothing to end")
 		return nil
 	}
 	if payload.VmId == "" {

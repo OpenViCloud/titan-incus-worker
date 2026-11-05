@@ -32,7 +32,7 @@ func TestClient_Non2xx_IsAnHTTPErrorWithABoundedBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := NewWithHTTPClient(server.URL, "t", server.Client()).Patch(context.Background(), "/internal/vms/1/status", map[string]string{})
+	err := NewWithHTTPClient(server.URL, "t", server.Client()).Patch(context.Background(), "/internal/vms/1/observation", map[string]string{})
 
 	var httpErr *HTTPError
 	if !errors.As(err, &httpErr) || httpErr.StatusCode != 422 || len(httpErr.Body) != maxErrorBody {

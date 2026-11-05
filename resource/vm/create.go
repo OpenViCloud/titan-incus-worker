@@ -24,9 +24,7 @@ const (
 
 // createPayload mirrors ProviderCommandQueue.EnqueueVmCreateAsync. templateId is already the cluster's image alias.
 type createPayload struct {
-	VmId string `json:"vmId"`
-	// Empty on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
-	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	VmId              string  `json:"vmId"`
 	RequestId         string  `json:"requestId"`
 	Name              string  `json:"name"`
 	CpuUnits          float64 `json:"cpuUnits"`
@@ -41,8 +39,7 @@ type createPayload struct {
 }
 
 // Create runs vm.create and ends the request it names: Done with the instance name and what it read of the instance,
-// Failed when it gives up (titan-ops architecture/resource-lifecycle.md#kinds). A command without a request id reports
-// Created or the give-up on the old route.
+// Failed when it gives up (titan-ops architecture/resource-lifecycle.md#kinds).
 type Create struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -82,9 +79,6 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 			return err
 		}
 	}
-	if payload.RequestId == "" {
-		return sendStatus(ctx, h.cp, payload.VmId, statusReport{Report: reportCreated, ExternalId: request.Name})
-	}
 	observed := readObserved(ctx, cl.Provider, payload.ProjectName, request.Name, logger)
 	return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, requestEnd{Outcome: controlplane.OutcomeDone, ExternalId: request.Name, Observed: observed})
 }
@@ -97,17 +91,12 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
+	if payload.RequestId == "" {
+		logger.Warn("no request id; nothing to end")
+		return nil
+	}
 	existing := h.existingInstance(ctx, leased.ClusterId, payload)
-	if payload.RequestId != "" {
-		return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, failedEnd(existing, reasonProvisionFailed, cause))
-	}
-	report := statusReport{
-		Report:     reportRequestFailed,
-		ExternalId: existing,
-		Reason:     reasonProvisionFailed,
-		Detail:     cause.Error(),
-	}
-	return sendStatus(ctx, h.cp, payload.VmId, report)
+	return sendRequestEnd(ctx, h.cp, payload.VmId, payload.RequestId, failedEnd(existing, reasonProvisionFailed, cause))
 }
 
 // existingInstance returns the instance name when it is on Incus, "" when it is not or cannot be read.
@@ -136,10 +125,10 @@ func decodeCreate(leased command.Leased) (createPayload, error) {
 		return createPayload{}, err
 	}
 	// A VM without its network would run with no NIC while the control plane reports it Running.
-	isComplete := payload.VmId != "" && payload.ProjectName != "" && payload.TemplateId != "" &&
+	isComplete := payload.VmId != "" && payload.RequestId != "" && payload.ProjectName != "" && payload.TemplateId != "" &&
 		payload.ExternalNetworkId != "" && payload.VcpuCount > 0 && payload.MemoryMb > 0
 	if !isComplete {
-		return createPayload{}, command.Permanent(fmt.Errorf("vm.create payload lacks vmId, projectName, templateId, externalNetworkId, vcpuCount or memoryMb"))
+		return createPayload{}, command.Permanent(fmt.Errorf("vm.create payload lacks vmId, requestId, projectName, templateId, externalNetworkId, vcpuCount or memoryMb"))
 	}
 	return payload, nil
 }

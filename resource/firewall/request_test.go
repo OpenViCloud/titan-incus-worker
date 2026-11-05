@@ -15,9 +15,9 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
-// A command that carries a requestId ends that request on its own route
+// A command ends the request it carries on that request's route
 // (titan-ops architecture/resource-lifecycle.md#callback-routes): Done with what the worker read of the rule, Failed
-// with a fixed reason and the raw error as detail. firewall_test.go keeps the commands without one, on the old route.
+// with a fixed reason and the raw error as detail.
 
 const requestId = "77777777-6666-5555-4444-333333333333"
 
@@ -34,10 +34,14 @@ func giveUpCommand(h command.Handler, l command.Leased, cause error) error {
 	return h.GiveUp(context.Background(), l, cause, testsupport.DiscardLogger())
 }
 
-func withRequest(l command.Leased) command.Leased {
+// withoutRequest drops the payload's requestId, or sets it empty.
+func withoutRequest(l command.Leased, keyAbsent bool) command.Leased {
 	var payload map[string]any
 	_ = json.Unmarshal(l.Payload, &payload)
-	payload["requestId"] = requestId
+	delete(payload, "requestId")
+	if !keyAbsent {
+		payload["requestId"] = ""
+	}
 	return leased(l.Kind, payload)
 }
 
@@ -64,22 +68,16 @@ func decoded(t *testing.T, requests []testsupport.Request, cp *testsupport.Contr
 	return body
 }
 
-// requestEnd reads the one report on the request route, and checks nothing went to the old one.
+// requestEnd reads the one report on the request route.
 func requestEnd(t *testing.T, cp *testsupport.ControlPlane) map[string]any {
 	t.Helper()
-	if len(requestsExactlyTo(cp, ruleRoute)) != 0 {
-		t.Fatalf("a command with a requestId used the old route: %+v", cp.Requests())
-	}
 	return decoded(t, requestsExactlyTo(cp, requestRoute), cp)
 }
 
-// observationOf reads the one observation of a rule, and checks nothing went to its old route.
+// observationOf reads the one observation of a rule.
 func observationOf(t *testing.T, cp *testsupport.ControlPlane, id string) map[string]any {
 	t.Helper()
 	route := "PATCH /internal/networks/" + networkId + "/firewall-rules/" + id
-	if len(requestsExactlyTo(cp, route)) != 0 {
-		t.Fatalf("the reconciler used the old route: %+v", cp.Requests())
-	}
 	return decoded(t, requestsExactlyTo(cp, route+"/observation"), cp)
 }
 
@@ -95,7 +93,7 @@ func TestCreate_WithARequest_EndsItDone_WithTheIdAndTheStateItReadBack(t *testin
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl()
 
-	err := runCommand(NewCreate(cp.Client(), clusters(p)), withRequest(createLeased()))
+	err := runCommand(NewCreate(cp.Client(), clusters(p)), createLeased())
 
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +110,7 @@ func TestCreate_WithARequest_RuleAlreadyThere_EndsItDone_WithTheStateItFound(t *
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl(api.NetworkACLRule{Action: "allow", Description: ruleId, State: "logged"})
 
-	err := runCommand(NewCreate(cp.Client(), clusters(p)), withRequest(createLeased()))
+	err := runCommand(NewCreate(cp.Client(), clusters(p)), createLeased())
 
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +135,7 @@ func TestCreate_WithARequest_GiveUp_EndsItFailed_CarryingTheIdOnlyWhenTheRuleIsT
 	for _, c := range cases {
 		cp := testsupport.NewControlPlane(t)
 
-		err := giveUpCommand(NewCreate(cp.Client(), clusters(c.p)), withRequest(createLeased()), errors.New("gave up"))
+		err := giveUpCommand(NewCreate(cp.Client(), clusters(c.p)), createLeased(), errors.New("gave up"))
 
 		if err != nil {
 			t.Fatal(err)
@@ -157,7 +155,7 @@ func TestCreate_WithARequest_GiveUp_AclReadFails_IsRetryable_AndReportsNothing(t
 	p := withAcl(api.NetworkACLRule{Description: ruleId, State: "enabled"})
 	p.GetACLErr = errors.New("incus unreachable")
 
-	err := giveUpCommand(NewCreate(cp.Client(), clusters(p)), withRequest(createLeased()), errors.New("gave up"))
+	err := giveUpCommand(NewCreate(cp.Client(), clusters(p)), createLeased(), errors.New("gave up"))
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -167,28 +165,11 @@ func TestCreate_WithARequest_GiveUp_AclReadFails_IsRetryable_AndReportsNothing(t
 	}
 }
 
-// The old route keeps today's give-up: a read that fails reads as "not there".
-func TestCreate_WithoutARequest_GiveUp_AclReadFails_ReportsWithoutAnId(t *testing.T) {
-	cp := testsupport.NewControlPlane(t)
-	p := withAcl(api.NetworkACLRule{Description: ruleId, State: "enabled"})
-	p.GetACLErr = errors.New("incus unreachable")
-
-	err := giveUpCommand(NewCreate(cp.Client(), clusters(p)), createLeased(), errors.New("gave up"))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := decoded(t, requestsExactlyTo(cp, ruleRoute), cp)
-	if _, hasId := body["externalRuleId"]; body["report"] != reportRequestFailed || hasId {
-		t.Fatalf("report: %v", body)
-	}
-}
-
 func TestDelete_WithARequest_EndsItDone_WithoutAnObservation(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl(api.NetworkACLRule{Description: ruleId, State: "enabled"})
 
-	err := runCommand(NewDelete(cp.Client(), clusters(p)), withRequest(deleteLeased()))
+	err := runCommand(NewDelete(cp.Client(), clusters(p)), deleteLeased())
 
 	if err != nil {
 		t.Fatal(err)
@@ -214,7 +195,7 @@ func TestDelete_WithARequest_GiveUp_IsDone_WhenTheAclNoLongerHasTheRule_ElseFail
 	for _, c := range cases {
 		cp := testsupport.NewControlPlane(t)
 
-		err := giveUpCommand(NewDelete(cp.Client(), clusters(c.p)), withRequest(deleteLeased()), errors.New("refused"))
+		err := giveUpCommand(NewDelete(cp.Client(), clusters(c.p)), deleteLeased(), errors.New("refused"))
 
 		if err != nil {
 			t.Fatal(err)
@@ -236,7 +217,7 @@ func TestDelete_WithARequest_GiveUp_AclReadFails_IsRetryable_AndReportsNothing(t
 	p := withAcl(api.NetworkACLRule{Description: ruleId, State: "enabled"})
 	p.GetACLErr = errors.New("incus unreachable")
 
-	err := giveUpCommand(NewDelete(cp.Client(), clusters(p)), withRequest(deleteLeased()), errors.New("refused"))
+	err := giveUpCommand(NewDelete(cp.Client(), clusters(p)), deleteLeased(), errors.New("refused"))
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -251,7 +232,7 @@ func TestGiveUp_WithARequest_CutsTheDetailAt1000Runes_NotBytes(t *testing.T) {
 	p := withAcl(api.NetworkACLRule{Description: ruleId, State: "enabled"})
 	long := strings.Repeat("é", controlplane.MaxDetail+10)
 
-	err := giveUpCommand(NewDelete(cp.Client(), clusters(p)), withRequest(deleteLeased()), errors.New(long))
+	err := giveUpCommand(NewDelete(cp.Client(), clusters(p)), deleteLeased(), errors.New(long))
 
 	if err != nil {
 		t.Fatal(err)
@@ -262,39 +243,45 @@ func TestGiveUp_WithARequest_CutsTheDetailAt1000Runes_NotBytes(t *testing.T) {
 	}
 }
 
-// A command the old control plane enqueued without a requestId keeps the old route until rollout phase 6
-// (titan-ops architecture/resource-lifecycle.md#rollout).
-func TestCommands_WithoutARequest_ReportOnTheOldRoute(t *testing.T) {
+// The control plane puts a requestId in every command: one without it is malformed, and has nothing to end.
+func TestCommands_WithoutARequest_FailForGood_AndCallNothing(t *testing.T) {
 	cases := []struct {
 		name string
-		run  func(cp *testsupport.ControlPlane) error
+		h    func(cp *testsupport.ControlPlane, p *testsupport.Provider) command.Handler
+		l    command.Leased
 	}{
-		{"create", func(cp *testsupport.ControlPlane) error {
-			return runCommand(NewCreate(cp.Client(), clusters(withAcl())), createLeased())
-		}},
-		{"create give-up", func(cp *testsupport.ControlPlane) error {
-			return giveUpCommand(NewCreate(cp.Client(), clusters(withAcl())), createLeased(), errors.New("x"))
-		}},
-		{"delete", func(cp *testsupport.ControlPlane) error {
-			return runCommand(NewDelete(cp.Client(), clusters(withAcl())), deleteLeased())
-		}},
-		{"delete give-up", func(cp *testsupport.ControlPlane) error {
-			return giveUpCommand(NewDelete(cp.Client(), clusters(withAcl())), deleteLeased(), errors.New("x"))
-		}},
+		{"create", func(cp *testsupport.ControlPlane, p *testsupport.Provider) command.Handler {
+			return NewCreate(cp.Client(), clusters(p))
+		}, createLeased()},
+		{"delete", func(cp *testsupport.ControlPlane, p *testsupport.Provider) command.Handler {
+			return NewDelete(cp.Client(), clusters(p))
+		}, deleteLeased()},
 	}
 	for _, c := range cases {
-		cp := testsupport.NewControlPlane(t)
+		for _, keyAbsent := range []bool{true, false} {
+			l := withoutRequest(c.l, keyAbsent)
+			cp := testsupport.NewControlPlane(t)
+			p := withAcl(api.NetworkACLRule{Description: ruleId, State: "enabled"})
+			callsBefore := p.Calls
 
-		if err := c.run(cp); err != nil {
-			t.Fatalf("%s: %v", c.name, err)
-		}
-		if len(requestsExactlyTo(cp, ruleRoute)) != 1 || len(cp.RequestsTo(ruleRoute+"/requests/")) != 0 {
-			t.Errorf("%s: reports %+v", c.name, cp.Requests())
+			runErr := runCommand(c.h(cp, p), l)
+			giveUpErr := giveUpCommand(c.h(cp, p), l, errors.New("x"))
+
+			if runErr == nil || command.IsRetryable(runErr) {
+				t.Errorf("%s, key absent %v: run wants permanent, got %v", c.name, keyAbsent, runErr)
+			}
+			if giveUpErr != nil {
+				t.Errorf("%s, key absent %v: give-up: %v", c.name, keyAbsent, giveUpErr)
+			}
+			if len(cp.Requests()) != 0 || p.Calls != callsBefore {
+				t.Errorf("%s, key absent %v: reports %+v, Incus calls %d", c.name, keyAbsent, cp.Requests(),
+					p.Calls-callsBefore)
+			}
 		}
 	}
 }
 
-func TestReconcile_SendsOnTheObservationRoute_NeverTheOldOne(t *testing.T) {
+func TestReconcile_SendsOnTheObservationRoute(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	cp.Respond(http.MethodGet, "/internal/reconcile/firewall-rules?clusterId=mock", http.StatusOK,
 		`[{"id":"`+ruleId+`","networkId":"`+networkId+`","externalId":"`+aclName+`/`+ruleId+`",`+

@@ -54,9 +54,7 @@ func DefaultAction(ingressPolicy string, egressPolicy string) (string, error) {
 
 type createPayload struct {
 	NetworkId string `json:"networkId"`
-	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
-	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
-	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes).
 	RequestId            string `json:"requestId"`
 	Name                 string `json:"name"`
 	ProjectName          string `json:"projectName"`
@@ -83,9 +81,8 @@ type Settling struct {
 var DefaultSettling = Settling{Every: time.Second, Within: 30 * time.Second}
 
 // Create runs network.create: the network's ACL, then an isolated OVN network in the tenant's project that carries
-// it. With a request id it ends the request Done with the provider id, the subnet and the status Incus shows once the
-// network has left Pending or the wait ran out. Without one it reports Created on the old route, and the reconciler
-// reports the status.
+// it. It ends the request Done with the provider id, the subnet and the status Incus shows once the network has left
+// Pending or the wait ran out.
 type Create struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -164,10 +161,6 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 		cidr = picked.Cidr
 		gateway = picked.Gateway
 	}
-	if payload.RequestId == "" {
-		report := statusReport{Report: reportCreated, ExternalId: request.Name, Cidr: cidr, Gateway: gateway}
-		return sendStatus(ctx, h.cp, payload.NetworkId, report)
-	}
 	// A read that fails returns its error: the next lease runs the create again, which finds the network ours.
 	status, err := settledStatus(ctx, cl.Provider, payload.ProjectName, request.Name, h.settling)
 	if err != nil {
@@ -220,17 +213,23 @@ func (h *Create) pickedSubnet(ctx context.Context, cl *cluster.Cluster, payload 
 	return Subnet{}, fmt.Errorf("network %s is not on the cluster after its create", name)
 }
 
-// GiveUp ends the request Failed (RequestFailed on the old route), with the provider id and subnet when the network
-// exists so its delete still reaches Incus.
+// GiveUp ends the request Failed, with the provider id and subnet when the network exists so its delete still reaches
+// Incus.
 func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
 	var payload createPayload
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
+	if payload.RequestId == "" {
+		logger.Warn("no request id; nothing to end")
+		return nil
+	}
 	if payload.NetworkId == "" {
 		return command.Permanent(errors.New("network.create payload lacks networkId: nobody to tell"))
 	}
-	report := statusReport{Report: reportRequestFailed, Reason: reasonCreateFailed, Detail: cause.Error()}
+	externalId := ""
+	cidr := ""
+	gateway := ""
 	// Whether Incus holds the network decides whether the control plane keeps the network's /64: a list that
 	// failed answers neither, so the next lease sends the give-up again.
 	networkExists, err := h.networkExists(ctx, leased.ClusterId, payload)
@@ -241,11 +240,11 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 		h.deleteAcl(ctx, leased.ClusterId, payload)
 	}
 	if networkExists {
-		report.ExternalId = provider.NetworkName(payload.NetworkId)
-		report.Cidr = payload.Cidr
+		externalId = provider.NetworkName(payload.NetworkId)
+		cidr = payload.Cidr
 		address, err := RouterAddress(payload.Cidr)
 		if err == nil {
-			report.Gateway = address.Gateway
+			gateway = address.Gateway
 		}
 		// Incus chose the subnet: report the one it has, not an empty one Titan would record.
 		cidrWasChosenByIncus := payload.Cidr == ""
@@ -254,20 +253,17 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 			if err == nil {
 				picked, err := h.pickedSubnet(ctx, cl, payload)
 				if err == nil {
-					report.Cidr = picked.Cidr
-					report.Gateway = picked.Gateway
+					cidr = picked.Cidr
+					gateway = picked.Gateway
 				}
 			}
 		}
 	}
-	if payload.RequestId == "" {
-		return sendStatus(ctx, h.cp, payload.NetworkId, report)
-	}
 	var observed *Observation
-	if report.Cidr != "" || report.Gateway != "" {
-		observed = &Observation{Cidr: report.Cidr, Gateway: report.Gateway}
+	if cidr != "" || gateway != "" {
+		observed = &Observation{Cidr: cidr, Gateway: gateway}
 	}
-	end := failed(report.ExternalId, observed, reasonCreateFailed, cause)
+	end := failed(externalId, observed, reasonCreateFailed, cause)
 	return endRequest(ctx, h.cp, payload.NetworkId, payload.RequestId, end)
 }
 
@@ -309,9 +305,9 @@ func decodeCreate(leased command.Leased) (createPayload, error) {
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return createPayload{}, err
 	}
-	isComplete := payload.NetworkId != "" && payload.ProjectName != ""
+	isComplete := payload.NetworkId != "" && payload.RequestId != "" && payload.ProjectName != ""
 	if !isComplete {
-		return createPayload{}, command.Permanent(errors.New("network.create payload lacks networkId or projectName"))
+		return createPayload{}, command.Permanent(errors.New("network.create payload lacks networkId, requestId or projectName"))
 	}
 	return payload, nil
 }

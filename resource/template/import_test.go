@@ -85,7 +85,7 @@ func sha256Hex(content []byte) string {
 
 func importLeased(imageUrl string) command.Leased {
 	encoded, _ := json.Marshal(map[string]any{
-		"templateId": templateId, "name": "Ubuntu-22.04-Standard", "description": "",
+		"templateId": templateId, "requestId": requestId, "name": "Ubuntu-22.04-Standard", "description": "",
 		"osImageName": "ubuntu/22.04", "imageUrl": imageUrl, "rootDiskSizeGb": nil,
 	})
 	return command.Leased{Kind: "template.sync", ClusterId: clusterId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
@@ -172,8 +172,7 @@ func TestSync_ImageUrl_UploadsTheBytesItDownloaded_UnderTheAlias_AndReportsCreat
 	if !strings.Contains(imported.Metadata, "architecture: x86_64") {
 		t.Fatalf("metadata.yaml in the tarball: %q", imported.Metadata)
 	}
-	body := onlyBody(t, cp)
-	if body["report"] != "Created" || body["externalId"] != "tpl-"+templateId {
+	if body := requestEnd(t, cp); !isDoneWithTheAlias(body) {
 		t.Fatalf("report: %v", body)
 	}
 }

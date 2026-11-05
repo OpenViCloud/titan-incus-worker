@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -15,10 +16,9 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
-// A command that carries a requestId ends that request on its own route
+// A command ends the request it carries on that request's own route
 // (titan-ops architecture/resource-lifecycle.md#callback-routes): Done after its one write, or a delete's give-up that
-// finds the snapshot gone; Failed with a fixed reason and the raw error, cut, as detail. The tests named
-// WithoutARequest here, and vmsnapshot_test.go, keep the commands without one on the old route.
+// finds the snapshot gone; Failed with a fixed reason and the raw error, cut, as detail.
 
 const requestId = "77777777-6666-5555-4444-333333333333"
 
@@ -29,10 +29,14 @@ const (
 	providerId       = instance + "/" + snapshotName
 )
 
-func withRequest(l command.Leased) command.Leased {
+// withoutRequest drops the payload's requestId, or leaves it empty when keepTheKey.
+func withoutRequest(l command.Leased, keepTheKey bool) command.Leased {
 	var payload map[string]any
 	_ = json.Unmarshal(l.Payload, &payload)
-	payload["requestId"] = requestId
+	delete(payload, "requestId")
+	if keepTheKey {
+		payload["requestId"] = ""
+	}
 	return leased(l.Kind, payload)
 }
 
@@ -44,11 +48,11 @@ func giveUpCommand(h command.Handler, l command.Leased, cause error) error {
 	return h.GiveUp(context.Background(), l, cause, testsupport.DiscardLogger())
 }
 
-// requestEnd reads the one report on the request route, and checks nothing went to the old one.
+// requestEnd reads the one report, which must be on the request route.
 func requestEnd(t *testing.T, cp *testsupport.ControlPlane) map[string]any {
 	t.Helper()
-	if len(cp.RequestsTo(statusPath)) != 0 {
-		t.Fatalf("a command with a requestId used the old route: %+v", cp.Requests())
+	if len(cp.Requests()) != 1 {
+		t.Fatalf("want one report, got %+v", cp.Requests())
 	}
 	return onlyBody(t, cp, requestRoute)
 }
@@ -82,7 +86,7 @@ func TestRun_WithARequest_EndsItDone_OnTheRequestRoute(t *testing.T) {
 			p.InstanceSnapshots[snapshotKey] = true
 		}
 
-		err := runCommand(c.handler(cp, p), withRequest(c.leased))
+		err := runCommand(c.handler(cp, p), c.leased)
 
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
@@ -100,34 +104,12 @@ func TestRun_WithARequest_EndsItDone_OnTheRequestRoute(t *testing.T) {
 	}
 }
 
-func TestCreate_WithARequest_PutsTheSnapshotOnIncus(t *testing.T) {
-	cp := testsupport.NewControlPlane(t)
-	p := testsupport.NewProvider()
-
-	err := runCommand(NewCreate(cp.Client(), clusters(p)), withRequest(createLeased()))
-
-	if err != nil || !p.InstanceSnapshots[snapshotKey] {
-		t.Fatalf("err %v, snapshots %v", err, p.InstanceSnapshots)
-	}
-}
-
-func TestRevert_WithARequest_RestoresTheDiskOnly(t *testing.T) {
-	cp := testsupport.NewControlPlane(t)
-	p := testsupport.NewProvider()
-
-	err := runCommand(NewRevert(cp.Client(), clusters(p)), withRequest(snapshotLeased("vm-snapshot.revert")))
-
-	if err != nil || len(p.UpdatedInstances) != 1 || p.UpdatedInstances[0].Restore != snapshotName || !p.UpdatedInstances[0].DiskOnly {
-		t.Fatalf("err %v, updates %+v", err, p.UpdatedInstances)
-	}
-}
-
 func TestRevert_WithARequest_VmGone_IsPermanent_AndReportsNothing(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.UpdateInstanceErr = testsupport.NotFound("Instance not found")
 
-	err := runCommand(NewRevert(cp.Client(), clusters(p)), withRequest(snapshotLeased("vm-snapshot.revert")))
+	err := runCommand(NewRevert(cp.Client(), clusters(p)), snapshotLeased("vm-snapshot.revert"))
 
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want a permanent error, got %v", err)
@@ -146,7 +128,7 @@ func TestCreate_WithARequest_GiveUp_EndsItFailed_CarryingTheIdOnlyWhenTheSnapsho
 			p.InstanceSnapshots[snapshotKey] = true
 		}
 
-		err := giveUpCommand(NewCreate(cp.Client(), clusters(p)), withRequest(createLeased()), errors.New("raw"))
+		err := giveUpCommand(NewCreate(cp.Client(), clusters(p)), createLeased(), errors.New("raw"))
 
 		if err != nil {
 			t.Fatal(err)
@@ -170,7 +152,7 @@ func TestCreate_WithARequest_GiveUp_SnapshotReadFails_IsRetryable_AndReportsNoth
 	p.InstanceSnapshots[snapshotKey] = true
 	p.GetSnapshotErr = errors.New("incus unreachable")
 
-	err := giveUpCommand(NewCreate(cp.Client(), clusters(p)), withRequest(createLeased()), errors.New("raw"))
+	err := giveUpCommand(NewCreate(cp.Client(), clusters(p)), createLeased(), errors.New("raw"))
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -187,7 +169,7 @@ func TestRevert_WithARequest_GiveUp_IsAlwaysFailed_WithoutReadingIncus(t *testin
 	p.InstanceSnapshots[snapshotKey] = true
 	p.GetSnapshotErr = errors.New("incus unreachable")
 
-	err := giveUpCommand(NewRevert(cp.Client(), clusters(p)), withRequest(snapshotLeased("vm-snapshot.revert")), errors.New("raw"))
+	err := giveUpCommand(NewRevert(cp.Client(), clusters(p)), snapshotLeased("vm-snapshot.revert"), errors.New("raw"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +194,7 @@ func TestDelete_WithARequest_GiveUp_IsDone_WhenIncusNoLongerHasTheSnapshot_ElseF
 			p.InstanceSnapshots[snapshotKey] = true
 		}
 
-		err := NewDelete(cp.Client(), clusters(p)).GiveUp(context.Background(), withRequest(snapshotLeased("vm-snapshot.delete")),
+		err := NewDelete(cp.Client(), clusters(p)).GiveUp(context.Background(), snapshotLeased("vm-snapshot.delete"),
 			errors.New("in use"), logger)
 
 		if err != nil {
@@ -239,7 +221,7 @@ func TestDelete_WithARequest_GiveUp_IsDone_WhenIncusNoLongerHasTheSnapshot_ElseF
 func TestDelete_WithARequest_GiveUp_OnAClusterTheWorkerIsNotConfiguredFor_IsFailed(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
-	err := giveUpCommand(NewDelete(cp.Client(), cluster.Fixed{}), withRequest(snapshotLeased("vm-snapshot.delete")), errors.New("in use"))
+	err := giveUpCommand(NewDelete(cp.Client(), cluster.Fixed{}), snapshotLeased("vm-snapshot.delete"), errors.New("in use"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -254,7 +236,7 @@ func TestDelete_WithARequest_GiveUp_SnapshotReadFails_IsRetryable_AndReportsNoth
 	p := testsupport.NewProvider()
 	p.GetSnapshotErr = errors.New("incus unreachable")
 
-	err := giveUpCommand(NewDelete(cp.Client(), clusters(p)), withRequest(snapshotLeased("vm-snapshot.delete")), errors.New("in use"))
+	err := giveUpCommand(NewDelete(cp.Client(), clusters(p)), snapshotLeased("vm-snapshot.delete"), errors.New("in use"))
 
 	if err == nil || !command.IsRetryable(err) {
 		t.Fatalf("want retryable, got %v", err)
@@ -286,7 +268,7 @@ func TestGiveUps_WithARequest_CutTheDetailAt1000Runes_NotBytes(t *testing.T) {
 		p := testsupport.NewProvider()
 		p.InstanceSnapshots[snapshotKey] = true
 
-		err := giveUpCommand(c.handler(cp, p), withRequest(c.leased), errors.New(long))
+		err := giveUpCommand(c.handler(cp, p), c.leased, errors.New(long))
 
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
@@ -299,67 +281,54 @@ func TestGiveUps_WithARequest_CutTheDetailAt1000Runes_NotBytes(t *testing.T) {
 	}
 }
 
-// A command the old control plane enqueued without a requestId keeps the old route until rollout phase 6
-// (titan-ops architecture/resource-lifecycle.md#rollout).
-func TestCommands_WithoutARequest_ReportOnTheOldRoute(t *testing.T) {
+// A command without a requestId has no request to end: Run fails for good before touching Incus, and a give-up has
+// nothing to say (titan-ops architecture/resource-lifecycle.md#callback-routes).
+func TestCommands_WithoutARequest_FailForGood_AndCallNothing(t *testing.T) {
 	cases := []struct {
-		name       string
-		run        func(cp *testsupport.ControlPlane, p *testsupport.Provider) error
-		wantReport string
+		name    string
+		handler func(cp *testsupport.ControlPlane, p *testsupport.Provider) command.Handler
+		leased  command.Leased
 	}{
-		{"create", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return runCommand(NewCreate(cp.Client(), clusters(p)), createLeased())
-		}, "Created"},
-		{"create give-up", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return giveUpCommand(NewCreate(cp.Client(), clusters(p)), createLeased(), errors.New("x"))
-		}, "RequestFailed"},
-		{"revert", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return runCommand(NewRevert(cp.Client(), clusters(p)), snapshotLeased("vm-snapshot.revert"))
-		}, "Reverted"},
-		{"revert give-up", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return giveUpCommand(NewRevert(cp.Client(), clusters(p)), snapshotLeased("vm-snapshot.revert"), errors.New("x"))
-		}, "RequestFailed"},
-		{"delete", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return runCommand(NewDelete(cp.Client(), clusters(p)), snapshotLeased("vm-snapshot.delete"))
-		}, "Deleted"},
-		// The old route keeps the old give-up: no read, RequestFailed even with the snapshot gone.
-		{"delete give-up", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return giveUpCommand(NewDelete(cp.Client(), clusters(p)), snapshotLeased("vm-snapshot.delete"), errors.New("x"))
-		}, "RequestFailed"},
+		{"create", func(cp *testsupport.ControlPlane, p *testsupport.Provider) command.Handler {
+			return NewCreate(cp.Client(), clusters(p))
+		}, createLeased()},
+		{"revert", func(cp *testsupport.ControlPlane, p *testsupport.Provider) command.Handler {
+			return NewRevert(cp.Client(), clusters(p))
+		}, snapshotLeased("vm-snapshot.revert")},
+		{"delete", func(cp *testsupport.ControlPlane, p *testsupport.Provider) command.Handler {
+			return NewDelete(cp.Client(), clusters(p))
+		}, snapshotLeased("vm-snapshot.delete")},
 	}
 	for _, c := range cases {
-		cp := testsupport.NewControlPlane(t)
+		for _, keepTheKey := range []bool{false, true} {
+			name := fmt.Sprintf("%s, empty key %v", c.name, keepTheKey)
+			cp := testsupport.NewControlPlane(t)
+			p := testsupport.NewProvider()
+			p.InstanceSnapshots[snapshotKey] = true
+			logger, logs := testsupport.NewLogCapture(t)
+			h := c.handler(cp, p)
+			l := withoutRequest(c.leased, keepTheKey)
 
-		if err := c.run(cp, testsupport.NewProvider()); err != nil {
-			t.Fatalf("%s: %v", c.name, err)
-		}
-		requestRoutes := cp.RequestsTo("PATCH /internal/vms/" + vmId + "/snapshots/" + snapshotId + "/requests/")
-		if len(requestRoutes) != 0 {
-			t.Errorf("%s: reports %+v", c.name, cp.Requests())
-			continue
-		}
-		if got := onlyBody(t, cp, statusPath)["report"]; got != c.wantReport {
-			t.Errorf("%s: report %v, want %s", c.name, got, c.wantReport)
+			runErr := h.Run(context.Background(), l, logger)
+			giveUpErr := h.GiveUp(context.Background(), l, errors.New("raw"), logger)
+
+			if runErr == nil || command.IsRetryable(runErr) {
+				t.Errorf("%s: Run wants a permanent error, got %v", name, runErr)
+			}
+			if giveUpErr != nil {
+				t.Errorf("%s: give-up: %v", name, giveUpErr)
+			}
+			if len(cp.Requests()) != 0 || p.Calls != 0 {
+				t.Errorf("%s: reports %+v, Incus calls %d", name, cp.Requests(), p.Calls)
+			}
+			if got := logs.Records("no request id; nothing to end"); len(got) != 1 {
+				t.Errorf("%s: want one give-up line, got %v", name, got)
+			}
 		}
 	}
 }
 
-// The old route keeps the old create give-up too: a snapshot that cannot be read goes without its id.
-func TestCreate_WithoutARequest_GiveUp_SnapshotReadFails_StillReportsRequestFailed_WithoutTheId(t *testing.T) {
-	cp := testsupport.NewControlPlane(t)
-	p := testsupport.NewProvider()
-	p.InstanceSnapshots[snapshotKey] = true
-	p.GetSnapshotErr = errors.New("incus unreachable")
-
-	err := giveUpCommand(NewCreate(cp.Client(), clusters(p)), createLeased(), errors.New("raw"))
-
-	body := onlyBody(t, cp, statusPath)
-	if _, hasId := body["externalId"]; err != nil || body["report"] != "RequestFailed" || hasId {
-		t.Fatalf("err %v, report %v", err, body)
-	}
-}
-
-func TestReconcile_SendsOnTheObservationRoute_NeverTheOldOne(t *testing.T) {
+func TestReconcile_SendsOnTheObservationRoute(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	cp.Respond("GET", "/internal/reconcile/vm-snapshots?clusterId=mock", 200,
 		`[{"id":"`+snapshotId+`","vmId":"`+vmId+`","externalId":"vma/sone","currentExistence":"NotCreated"}]`)
@@ -371,8 +340,8 @@ func TestReconcile_SendsOnTheObservationRoute_NeverTheOldOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cp.RequestsTo(statusPath)) != 0 {
-		t.Fatalf("the reconciler used the old route: %+v", cp.Requests())
+	if len(cp.RequestsTo("PATCH")) != 1 {
+		t.Fatalf("want one report, got %+v", cp.Requests())
 	}
 	body := onlyBody(t, cp, observationRoute)
 	if body["exists"] != true || len(body) != 1 {

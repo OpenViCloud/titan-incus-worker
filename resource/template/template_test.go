@@ -23,26 +23,13 @@ const (
 
 func syncLeased() command.Leased {
 	encoded, _ := json.Marshal(map[string]any{
-		"templateId": templateId, "name": "Alma-9-DB", "description": "",
+		"templateId": templateId, "requestId": requestId, "name": "Alma-9-DB", "description": "",
 		"osImageName": "almalinux/9", "rootDiskSizeGb": nil,
 	})
 	return command.Leased{Kind: "template.sync", ClusterId: clusterId, Payload: encoded, Attempt: 1, MaxAttempts: 5}
 }
 
-func onlyBody(t *testing.T, cp *testsupport.ControlPlane) map[string]any {
-	t.Helper()
-	requests := cp.RequestsTo("PATCH /internal/templates/" + templateId + "/status")
-	if len(requests) != 1 {
-		t.Fatalf("want one status report, got %+v", cp.Requests())
-	}
-	var body map[string]any
-	if err := json.Unmarshal([]byte(requests[0].Body), &body); err != nil {
-		t.Fatal(err)
-	}
-	return body
-}
-
-func TestSync_AliasPresent_DoesNotPull_AndReportsCreated(t *testing.T) {
+func TestSync_AliasPresent_DoesNotPull_AndEndsTheRequestDone(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.Aliases["tpl-"+templateId] = true
@@ -55,8 +42,7 @@ func TestSync_AliasPresent_DoesNotPull_AndReportsCreated(t *testing.T) {
 	if len(p.CreatedImages) != 0 {
 		t.Fatal("pulled an image the cluster has")
 	}
-	body := onlyBody(t, cp)
-	if body["report"] != "Created" || body["clusterId"] != clusterId || body["externalId"] != "tpl-"+templateId {
+	if body := requestEnd(t, cp); !isDoneWithTheAlias(body) {
 		t.Fatalf("report: %v", body)
 	}
 }
@@ -79,12 +65,12 @@ func TestSync_AliasMissing_PullsTheVmImageUnderTheAlias(t *testing.T) {
 	if len(pulled.Aliases) != 1 || pulled.Aliases[0].Name != "tpl-"+templateId {
 		t.Fatalf("aliases: %+v", pulled.Aliases)
 	}
-	if onlyBody(t, cp)["report"] != "Created" {
-		t.Fatal("want Created")
+	if body := requestEnd(t, cp); !isDoneWithTheAlias(body) {
+		t.Fatalf("report: %v", body)
 	}
 }
 
-func TestSync_AliasCreatedByAnotherRun_IsCreated(t *testing.T) {
+func TestSync_AliasCreatedByAnotherRun_EndsTheRequestDone(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.CreateImageErr = &provider.OperationFailedError{Status: "Failure", Message: `Alias "tpl-` + templateId + `" already exists`}
@@ -93,6 +79,9 @@ func TestSync_AliasCreatedByAnotherRun_IsCreated(t *testing.T) {
 
 	if err != nil {
 		t.Fatal(err)
+	}
+	if body := requestEnd(t, cp); !isDoneWithTheAlias(body) {
+		t.Fatalf("report: %v", body)
 	}
 }
 
@@ -113,8 +102,8 @@ func TestSync_ImageOfAnotherArchitecture_IsDeletedAndFailsForGood(t *testing.T) 
 	if len(p.DeletedImages) != 1 || p.DeletedImages[0] != "fp-tpl-"+templateId {
 		t.Fatalf("deleted images: %v — a wrong-architecture image left under the alias reads as present to the reconciler", p.DeletedImages)
 	}
-	if len(cp.RequestsTo("PATCH /internal/templates/"+templateId+"/status")) != 0 {
-		t.Fatal("reported a status: the give-up callback reports the failure, not Run")
+	if len(cp.Requests()) != 0 {
+		t.Fatalf("reported %+v: the give-up callback reports the failure, not Run", cp.Requests())
 	}
 }
 
@@ -152,7 +141,7 @@ func TestSync_AliasPresentOnAnotherArchitecture_IsCheckedToo(t *testing.T) {
 	}
 }
 
-func TestSync_ImageOfTheClusterArchitecture_IsCreated(t *testing.T) {
+func TestSync_ImageOfTheClusterArchitecture_EndsTheRequestDone(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 	p.ServerArchitectures = []string{"aarch64", "armv6l", "armv7l", "armv8l"}
@@ -166,12 +155,12 @@ func TestSync_ImageOfTheClusterArchitecture_IsCreated(t *testing.T) {
 	if len(p.DeletedImages) != 0 {
 		t.Fatalf("deleted %v", p.DeletedImages)
 	}
-	if onlyBody(t, cp)["report"] != "Created" {
-		t.Fatal("want Created")
+	if body := requestEnd(t, cp); !isDoneWithTheAlias(body) {
+		t.Fatalf("report: %v", body)
 	}
 }
 
-func TestSync_GiveUp_ReportsRequestFailedWithItsCluster_AFixedReason_AndTheRawError(t *testing.T) {
+func TestSync_GiveUp_EndsTheRequestOfItsClusterFailed_WithAFixedReason_AndTheRawError(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
 	err := NewSync(cp.Client(), cluster.Fixed{}, imageServer).GiveUp(context.Background(), syncLeased(), errors.New("pull timed out"), testsupport.DiscardLogger())
@@ -179,9 +168,7 @@ func TestSync_GiveUp_ReportsRequestFailedWithItsCluster_AFixedReason_AndTheRawEr
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := onlyBody(t, cp)
-	isRequestFailed := body["report"] == "RequestFailed" && body["clusterId"] == clusterId
-	if !isRequestFailed || body["reason"] != reasonSyncFailed || body["detail"] != "pull timed out" {
+	if body := requestEnd(t, cp); !isFailed(body, reasonSyncFailed, "pull timed out", false) {
 		t.Fatalf("report: %v", body)
 	}
 }
@@ -216,7 +203,7 @@ func TestSync_GiveUp_NamesTheCauseInTheReason(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		body := onlyBody(t, cp)
+		body := requestEnd(t, cp)
 		if body["reason"] != c.want || body["detail"] != cause.Error() {
 			t.Errorf("%s: report %v", c.name, body)
 		}
@@ -232,7 +219,7 @@ func TestSync_GiveUp_CutsALongErrorAtTheDetailLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	detail, _ := onlyBody(t, cp)["detail"].(string)
+	detail, _ := requestEnd(t, cp)["detail"].(string)
 	if len([]rune(detail)) != controlplane.MaxDetail {
 		t.Fatalf("detail is %d runes, want %d", len([]rune(detail)), controlplane.MaxDetail)
 	}

@@ -8,18 +8,6 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/controlplane"
 )
 
-// The reports of the old route, which UpdateVolumeStatusCommandHandler and UpdateVolumeSnapshotStatusCommandHandler map onto
-// the waiting request until rollout phase 6 (titan-ops architecture/resource-lifecycle.md#rollout). Incus has no status
-// word for a custom volume or its snapshots (titan-ops features/volume/design.md#volume-state-is-existence): an observation
-// says whether it exists and, for a volume, which instances use it; a give-up is a request failure
-// (titan-ops architecture/desired-and-current.md#request-failure).
-const (
-	ReportObserved      = "Observed"
-	ReportCreated       = "Created"
-	ReportRequestFailed = "RequestFailed"
-	ReportDeleted       = "Deleted"
-)
-
 // Reason is returned verbatim to the tenant, so it carries only these fixed texts; the raw error goes to the
 // admin-only detail (titan-ops features/public-api/design.md#status-reason).
 const (
@@ -29,23 +17,19 @@ const (
 	reasonDeleteFailed = "Volume deletion failed due to a system error. Please try again or contact support."
 )
 
-// StatusReport is the body of the old PATCH /internal/volumes/{volumeId}/status and of its snapshots' callback, and the
-// decision DecideVolumeReport and DecideSnapshotReport return, whose Exists (and, for a volume, AttachedTo) the
-// reconciler sends on the observation routes. Exists is a pointer so an observation always says true or false, and the
-// other reports leave it out. AttachedTo is the names of the instances in the volume's used_by, as Incus lists them:
-// which are Titan VMs is the control plane's to say (titan-ops features/volume/design.md#attachment-from-used-by).
+// StatusReport is what the worker saw of a volume or snapshot: the decision DecideVolumeReport and DecideSnapshotReport
+// return, which the reconciler sends on the observation routes, and what a give-up of an attach or detach reads. Incus
+// has no status word for a custom volume or its snapshots (titan-ops features/volume/design.md#volume-state-is-existence),
+// so it is whether the object exists and, for a volume, AttachedTo: the names of the instances in its used_by, as Incus
+// lists them; which are Titan VMs is the control plane's to say (titan-ops features/volume/design.md#attachment-from-used-by).
 type StatusReport struct {
-	Report     string   `json:"report"`
-	Exists     *bool    `json:"exists,omitempty"`
-	AttachedTo []string `json:"attachedTo,omitempty"`
-	ExternalId string   `json:"externalId,omitempty"`
-	Reason     string   `json:"reason,omitempty"`
-	Detail     string   `json:"detail,omitempty"`
+	Exists     bool
+	AttachedTo []string
 }
 
 // Observed builds an observation: whether Incus has the object and, for a volume, the instances using it.
 func Observed(exists bool, attachedTo []string) StatusReport {
-	return StatusReport{Report: ReportObserved, Exists: &exists, AttachedTo: attachedTo}
+	return StatusReport{Exists: exists, AttachedTo: attachedTo}
 }
 
 // RequestEnd is the body of PATCH /internal/volumes/{volumeId}/requests/{requestId}, and without Observed of a snapshot's
@@ -112,15 +96,4 @@ func volumePath(volumeId string) string {
 
 func snapshotPath(volumeId string, snapshotId string) string {
 	return volumePath(volumeId) + "/snapshots/" + url.PathEscape(snapshotId)
-}
-
-// SendStatus reports on one volume on the old route, which a command without a request id still uses; a restore reports
-// on the volume it makes.
-func SendStatus(ctx context.Context, cp *controlplane.Client, volumeId string, report StatusReport) error {
-	return cp.Patch(ctx, "/internal/volumes/"+url.PathEscape(volumeId)+"/status", report)
-}
-
-// SendSnapshotStatus is the old PATCH /internal/volumes/{volumeId}/snapshots/{snapshotId}/status; the body is a StatusReport.
-func SendSnapshotStatus(ctx context.Context, cp *controlplane.Client, volumeId string, snapshotId string, report StatusReport) error {
-	return cp.Patch(ctx, snapshotPath(volumeId, snapshotId)+"/status", report)
 }

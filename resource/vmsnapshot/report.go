@@ -13,45 +13,17 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/loop/command"
 )
 
-// The reports of the old route, which UpdateVmSnapshotStatusCommandHandler maps onto the waiting request until rollout
-// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout). Incus has no status word for an instance snapshot
-// (titan-ops features/vm/design.md#vm-snapshot-is-existence), and a give-up is a request failure
-// (titan-ops architecture/desired-and-current.md#request-failure).
-const (
-	reportCreated       = "Created"
-	reportReverted      = "Reverted"
-	reportRequestFailed = "RequestFailed"
-	reportDeleted       = "Deleted"
-)
-
 // The give-up reasons reach the tenant as the snapshot's requestFailureReason, so they are fixed texts; the raw error
-// goes to the admin-only detail.
+// goes to the admin-only detail (titan-ops architecture/desired-and-current.md#request-failure).
 const (
 	reasonCreateFailed = "Snapshot creation failed due to a system error. Please try again or contact support."
 	reasonRevertFailed = "Reverting to the snapshot failed due to a system error. Please try again or contact support."
 	reasonDeleteFailed = "Snapshot deletion failed due to a system error. Please try again or contact support."
 )
 
-// statusReport is the body of the old PATCH /internal/vms/{vmId}/snapshots/{snapshotId}/status, which a command without
-// a request id still uses.
-type statusReport struct {
-	Report     string `json:"report"`
-	ExternalId string `json:"externalId,omitempty"`
-	Reason     string `json:"reason,omitempty"`
-	Detail     string `json:"detail,omitempty"`
-}
-
-func requestFailed(reason string, cause error) statusReport {
-	return statusReport{Report: reportRequestFailed, Reason: reason, Detail: cause.Error()}
-}
-
-func sendStatus(ctx context.Context, cp *controlplane.Client, vmId string, snapshotId string, report statusReport) error {
-	return cp.Patch(ctx, snapshotPath(vmId, snapshotId)+"/status", report)
-}
-
 // RequestEnd is the body of PATCH /internal/vms/{vmId}/snapshots/{snapshotId}/requests/{requestId}: the report that
-// ends the request a command carries (titan-ops architecture/resource-lifecycle.md#callback-routes). A snapshot has no
-// state to observe, so it carries none.
+// ends the request a command carries (titan-ops architecture/resource-lifecycle.md#callback-routes). Incus has no status
+// word for an instance snapshot (titan-ops features/vm/design.md#vm-snapshot-is-existence), so it carries none.
 type RequestEnd struct {
 	Outcome    string `json:"outcome"`
 	ExternalId string `json:"externalId,omitempty"`
@@ -93,9 +65,7 @@ func snapshotPath(vmId string, snapshotId string) string {
 // snapshotPayload mirrors EnqueueVmSnapshotRevertAsync and EnqueueVmSnapshotDeleteAsync.
 type snapshotPayload struct {
 	SnapshotId string `json:"snapshotId"`
-	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
-	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
-	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes).
 	RequestId          string `json:"requestId"`
 	VmId               string `json:"vmId"`
 	ExternalSnapshotId string `json:"externalSnapshotId"`
@@ -107,9 +77,9 @@ func decodeSnapshot(leased command.Leased) (snapshotPayload, string, string, err
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return snapshotPayload{}, "", "", err
 	}
-	isComplete := payload.SnapshotId != "" && payload.VmId != "" && payload.ProjectName != ""
+	isComplete := payload.SnapshotId != "" && payload.RequestId != "" && payload.VmId != "" && payload.ProjectName != ""
 	if !isComplete {
-		return snapshotPayload{}, "", "", command.Permanent(fmt.Errorf("%s payload lacks snapshotId, vmId or projectName", leased.Kind))
+		return snapshotPayload{}, "", "", command.Permanent(fmt.Errorf("%s payload lacks snapshotId, requestId, vmId or projectName", leased.Kind))
 	}
 	instance, snapshot, err := provider.SplitSnapshotId(payload.ExternalSnapshotId)
 	if err != nil {

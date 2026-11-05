@@ -17,26 +17,27 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
-// A template.sync that carries a requestId ends that request on the route of its template in its cluster
+// A template.sync ends the request it carries on the route of its template in its cluster
 // (titan-ops architecture/resource-lifecycle.md#callback-routes): Done carrying the alias, or Failed with a fixed
-// reason, the raw error cut as detail, and the alias only when Incus has it on the cluster's architecture. The tests
-// named WithoutARequest here, and template_test.go, keep the commands without one on the old route.
+// reason, the raw error cut as detail, and the alias only when Incus has it on the cluster's architecture.
 
 const requestId = "77777777-6666-5555-4444-333333333333"
 
 const (
 	alias            = "tpl-" + templateId
-	statusRoute      = "PATCH /internal/templates/" + templateId + "/status"
 	templateInIt     = "PATCH /internal/templates/" + templateId + "/clusters/" + clusterId
 	requestRoute     = templateInIt + "/requests/" + requestId
-	anyRequestRoute  = templateInIt + "/requests/"
 	observationRoute = templateInIt + "/observation"
 )
 
-func withRequest(l command.Leased) command.Leased {
+// withoutRequest drops the payload's requestId, or leaves it empty when keepTheKey.
+func withoutRequest(l command.Leased, keepTheKey bool) command.Leased {
 	var payload map[string]any
 	_ = json.Unmarshal(l.Payload, &payload)
-	payload["requestId"] = requestId
+	delete(payload, "requestId")
+	if keepTheKey {
+		payload["requestId"] = ""
+	}
 	l.Payload, _ = json.Marshal(payload)
 	return l
 }
@@ -71,12 +72,9 @@ func onlyBodyAt(t *testing.T, cp *testsupport.ControlPlane, prefix string) map[s
 	return body
 }
 
-// requestEnd reads the one report on the request route, and checks nothing went to the old one.
+// requestEnd reads the one report, which must be on the request route.
 func requestEnd(t *testing.T, cp *testsupport.ControlPlane) map[string]any {
 	t.Helper()
-	if len(cp.RequestsTo(statusRoute)) != 0 {
-		t.Fatalf("a command with a requestId used the old route: %+v", cp.Requests())
-	}
 	if len(cp.Requests()) != 1 {
 		t.Fatalf("want one report, got %+v", cp.Requests())
 	}
@@ -98,7 +96,7 @@ func TestSync_WithARequest_PullsTheImage_AndEndsItDone_CarryingTheAlias(t *testi
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
-	err := runSync(syncWith(cp, p), withRequest(syncLeased()))
+	err := runSync(syncWith(cp, p), syncLeased())
 
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +115,7 @@ func TestSync_WithARequest_AliasPresent_WritesNothing_AndEndsItDone_CarryingTheA
 	cp := testsupport.NewControlPlane(t)
 	p := withAlias(testsupport.NewProvider())
 
-	err := runSync(syncWith(cp, p), withRequest(syncLeased()))
+	err := runSync(syncWith(cp, p), syncLeased())
 
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +147,7 @@ func TestSync_WithARequest_AFailedWrite_ReportsNothing_AndReturnsTheError(t *tes
 		p := testsupport.NewProvider()
 		c.prepare(p)
 
-		err := runSync(syncWith(cp, p), withRequest(syncLeased()))
+		err := runSync(syncWith(cp, p), syncLeased())
 
 		if err == nil || len(cp.Requests()) != 0 {
 			t.Errorf("%s: err %v, requests %+v", c.name, err, cp.Requests())
@@ -163,7 +161,7 @@ func TestSync_WithARequest_GiveUp_AliasOfTheClusterArchitecture_EndsItFailed_Car
 	cp := testsupport.NewControlPlane(t)
 	p := withAlias(testsupport.NewProvider())
 
-	err := giveUpSync(syncWith(cp, p), withRequest(syncLeased()), errors.New("report lost"))
+	err := giveUpSync(syncWith(cp, p), syncLeased(), errors.New("report lost"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -176,7 +174,7 @@ func TestSync_WithARequest_GiveUp_AliasOfTheClusterArchitecture_EndsItFailed_Car
 func TestSync_WithARequest_GiveUp_AliasAbsent_EndsItFailed_WithoutAnId(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
-	err := giveUpSync(syncWith(cp, testsupport.NewProvider()), withRequest(syncLeased()), errors.New("pull timed out"))
+	err := giveUpSync(syncWith(cp, testsupport.NewProvider()), syncLeased(), errors.New("pull timed out"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +190,7 @@ func TestSync_WithARequest_GiveUp_AliasOfAnUnlistedImage_EndsItFailed_WithoutAnI
 	p := withAlias(testsupport.NewProvider())
 	p.UnlistedImages = map[string]bool{"fp-" + alias: true}
 
-	err := giveUpSync(syncWith(cp, p), withRequest(syncLeased()), errors.New("pull timed out"))
+	err := giveUpSync(syncWith(cp, p), syncLeased(), errors.New("pull timed out"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +209,7 @@ func TestSync_WithARequest_GiveUp_AliasOfAnotherArchitecture_EndsItFailed_Withou
 	p.ImageArchitectures["fp-"+alias] = "x86_64"
 	cause := errors.New("deleting it failed: connection reset")
 
-	err := giveUpSync(syncWith(cp, p), withRequest(syncLeased()), cause)
+	err := giveUpSync(syncWith(cp, p), syncLeased(), cause)
 
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +251,7 @@ func TestSync_WithARequest_GiveUp_AReadThatFails_IsRetryable_AndReportsNothing(t
 
 		h := NewSync(cp.Client(), c.clusters(p), imageServer)
 
-		err := giveUpSync(h, withRequest(syncLeased()), errors.New("raw"))
+		err := giveUpSync(h, syncLeased(), errors.New("raw"))
 
 		if err == nil || !command.IsRetryable(err) {
 			t.Errorf("%s: want retryable, got %v", c.name, err)
@@ -273,7 +271,7 @@ func TestSync_WithARequest_GiveUp_OnAClusterTheWorkerIsNotConfiguredFor_EndsItFa
 	cp := testsupport.NewControlPlane(t)
 	cause := cluster.ErrNoCluster
 
-	err := giveUpSync(NewSync(cp.Client(), cluster.Fixed{}, imageServer), withRequest(syncLeased()), cause)
+	err := giveUpSync(NewSync(cp.Client(), cluster.Fixed{}, imageServer), syncLeased(), cause)
 
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +293,7 @@ func TestSync_WithARequest_GiveUp_NamesTheCauseInTheReason(t *testing.T) {
 	for _, c := range cases {
 		cp := testsupport.NewControlPlane(t)
 
-		err := giveUpSync(syncWith(cp, testsupport.NewProvider()), withRequest(syncLeased()), c.cause)
+		err := giveUpSync(syncWith(cp, testsupport.NewProvider()), syncLeased(), c.cause)
 
 		if err != nil {
 			t.Fatal(err)
@@ -310,7 +308,7 @@ func TestSync_WithARequest_GiveUp_CutsTheDetailAt1000Runes_NotBytes(t *testing.T
 	cp := testsupport.NewControlPlane(t)
 	long := strings.Repeat("é", controlplane.MaxDetail+10)
 
-	err := giveUpSync(syncWith(cp, withAlias(testsupport.NewProvider())), withRequest(syncLeased()), errors.New(long))
+	err := giveUpSync(syncWith(cp, withAlias(testsupport.NewProvider())), syncLeased(), errors.New(long))
 
 	if err != nil {
 		t.Fatal(err)
@@ -323,37 +321,35 @@ func TestSync_WithARequest_GiveUp_CutsTheDetailAt1000Runes_NotBytes(t *testing.T
 	}
 }
 
-// A command the old control plane enqueued without a requestId keeps the old route until rollout phase 6
-// (titan-ops architecture/resource-lifecycle.md#rollout); its give-up still reads nothing.
-func TestSync_WithoutARequest_ReportsOnTheOldRoute_AndItsGiveUpReadsNothing(t *testing.T) {
-	cases := []struct {
-		name         string
-		run          func(h *Sync) error
-		wantReport   string
-		readsNothing bool
-	}{
-		{"run", func(h *Sync) error { return runSync(h, syncLeased()) }, "Created", false},
-		{"give-up", func(h *Sync) error { return giveUpSync(h, syncLeased(), errors.New("x")) }, "RequestFailed", true},
-	}
-	for _, c := range cases {
+// A sync without a requestId has no request to end: Run fails for good before touching Incus, and a give-up has
+// nothing to say (titan-ops architecture/resource-lifecycle.md#callback-routes).
+func TestSync_WithoutARequest_FailsForGood_AndCallsNothing(t *testing.T) {
+	for _, keepTheKey := range []bool{false, true} {
 		cp := testsupport.NewControlPlane(t)
-		p := testsupport.NewProvider()
+		p := withAlias(testsupport.NewProvider())
+		logger, logs := testsupport.NewLogCapture(t)
+		h := syncWith(cp, p)
+		l := withoutRequest(syncLeased(), keepTheKey)
 
-		if err := c.run(syncWith(cp, p)); err != nil {
-			t.Fatalf("%s: %v", c.name, err)
+		runErr := h.Run(context.Background(), l, logger)
+		giveUpErr := h.GiveUp(context.Background(), l, errors.New("raw"), logger)
+
+		if runErr == nil || command.IsRetryable(runErr) {
+			t.Errorf("empty key %v: Run wants a permanent error, got %v", keepTheKey, runErr)
 		}
-		if len(cp.RequestsTo(anyRequestRoute)) != 0 || (c.readsNothing && p.Calls != 0) {
-			t.Errorf("%s: reports %+v, Incus calls %d", c.name, cp.Requests(), p.Calls)
-			continue
+		if giveUpErr != nil {
+			t.Errorf("empty key %v: give-up: %v", keepTheKey, giveUpErr)
 		}
-		body := onlyBodyAt(t, cp, statusRoute)
-		if body["report"] != c.wantReport || body["clusterId"] != clusterId {
-			t.Errorf("%s: report %v, want %s", c.name, body, c.wantReport)
+		if len(cp.Requests()) != 0 || p.Calls != 0 {
+			t.Errorf("empty key %v: reports %+v, Incus calls %d", keepTheKey, cp.Requests(), p.Calls)
+		}
+		if got := logs.Records("no request id; nothing to end"); len(got) != 1 {
+			t.Errorf("empty key %v: want one give-up line, got %v", keepTheKey, got)
 		}
 	}
 }
 
-func TestReconcile_SendsOnTheObservationRoute_NeverTheOldOne(t *testing.T) {
+func TestReconcile_SendsOnTheObservationRoute(t *testing.T) {
 	for _, there := range []bool{true, false} {
 		cp := testsupport.NewControlPlane(t)
 		recorded := "Exists"
@@ -372,8 +368,8 @@ func TestReconcile_SendsOnTheObservationRoute_NeverTheOldOne(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(cp.RequestsTo(statusRoute)) != 0 {
-			t.Fatalf("the reconciler used the old route: %+v", cp.Requests())
+		if len(cp.RequestsTo("PATCH")) != 1 {
+			t.Fatalf("want one report, got %+v", cp.Requests())
 		}
 		body := onlyBodyAt(t, cp, observationRoute)
 		if body["exists"] != there || len(body) != 1 {

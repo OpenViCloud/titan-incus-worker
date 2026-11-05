@@ -27,9 +27,9 @@ func (h *Detach) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	isComplete := payload.VolumeId != "" && payload.ExternalVolumeId != "" && payload.ProjectName != ""
+	isComplete := payload.VolumeId != "" && payload.RequestId != "" && payload.ExternalVolumeId != "" && payload.ProjectName != ""
 	if !isComplete {
-		return command.Permanent(fmt.Errorf("volume.detach payload lacks volumeId, externalVolumeId or projectName"))
+		return command.Permanent(fmt.Errorf("volume.detach payload lacks volumeId, requestId, externalVolumeId or projectName"))
 	}
 	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
@@ -48,13 +48,14 @@ func (h *Detach) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 			return err
 		}
 	}
-	return reportWhatIncusShows(ctx, h.cp, cl.Provider, payload, pool, logger)
+	observed := ReadObservation(ctx, cl.Provider, payload.ProjectName, pool, payload.ExternalVolumeId, logger)
+	return EndRequest(ctx, h.cp, payload.VolumeId, payload.RequestId, Done("", observed))
 }
 
 // GiveUp ends the request with what Incus shows: a detach that happened while its report failed is Done, one that did
 // not is Failed (see giveUp).
 func (h *Detach) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
-	return giveUp(ctx, h.cp, h.clusters, leased, cause, reasonDetachFailed, func(names []string, _ attachPayload) bool {
+	return giveUp(ctx, h.cp, h.clusters, leased, cause, reasonDetachFailed, logger, func(names []string, _ attachPayload) bool {
 		return len(names) == 0
 	})
 }

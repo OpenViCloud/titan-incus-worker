@@ -18,26 +18,25 @@ import (
 
 // A command that carries a requestId ends that request on its own route
 // (titan-ops architecture/resource-lifecycle.md#callback-routes): Done after its one write, or a delete's give-up that
-// finds the VIP gone; Failed with a fixed reason and the raw error, cut, as detail. The tests named WithoutARequest
-// here, and loadbalancer_test.go, keep the commands without one on the old route.
+// finds the VIP gone; Failed with a fixed reason and the raw error, cut, as detail. A command without one has no
+// request to end: it is refused and reports nothing.
 
 const requestId = "77777777-6666-5555-4444-333333333333"
 
 const (
-	statusRoute      = "PATCH /internal/load-balancers/" + loadBalancerId + "/status"
 	requestRoute     = "PATCH /internal/load-balancers/" + loadBalancerId + "/requests/" + requestId
-	anyRequestRoute  = "PATCH /internal/load-balancers/" + loadBalancerId + "/requests/"
 	observationRoute = "PATCH /internal/load-balancers/" + loadBalancerId + "/observation"
 )
 
 func createLeased() command.Leased { return leased("load-balancer.create", specFields()) }
-func updateLeased() command.Leased { return leased("load-balancer.update", updateFields()) }
+func updateLeased() command.Leased { return leased("load-balancer.update", specFields()) }
 func deleteLeased() command.Leased { return leased("load-balancer.delete", deleteFields()) }
 
-func withRequest(l command.Leased) command.Leased {
+// withPayload returns the command with its payload changed by edit.
+func withPayload(l command.Leased, edit func(payload map[string]any)) command.Leased {
 	var payload map[string]any
 	_ = json.Unmarshal(l.Payload, &payload)
-	payload["requestId"] = requestId
+	edit(payload)
 	return leased(l.Kind, payload)
 }
 
@@ -67,11 +66,11 @@ func onlyBody(t *testing.T, cp *testsupport.ControlPlane, prefix string) map[str
 	return body
 }
 
-// requestEnd reads the one report on the request route, and checks nothing went to the old one.
+// requestEnd reads the one report, which must be on the request route.
 func requestEnd(t *testing.T, cp *testsupport.ControlPlane) map[string]any {
 	t.Helper()
-	if len(cp.RequestsTo(statusRoute)) != 0 {
-		t.Fatalf("a command with a requestId used the old route: %+v", cp.Requests())
+	if len(cp.Requests()) != 1 {
+		t.Fatalf("want one report, got %+v", cp.Requests())
 	}
 	return onlyBody(t, cp, requestRoute)
 }
@@ -111,7 +110,7 @@ func TestRun_WithARequest_EndsItDone_OnTheRequestRoute(t *testing.T) {
 			withVip(p)
 		}
 
-		err := runCommand(c.handler(cp, p), withRequest(c.leased))
+		err := runCommand(c.handler(cp, p), c.leased)
 
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
@@ -133,16 +132,16 @@ func TestRun_WithARequest_WritesIncus(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withVms()
 
-	if err := runCommand(NewCreate(cp.Client(), clusters(p)), withRequest(createLeased())); err != nil {
+	if err := runCommand(NewCreate(cp.Client(), clusters(p)), createLeased()); err != nil {
 		t.Fatal(err)
 	}
-	if err := runCommand(NewUpdate(cp.Client(), clusters(p)), withRequest(updateLeased())); err != nil {
+	if err := runCommand(NewUpdate(cp.Client(), clusters(p)), updateLeased()); err != nil {
 		t.Fatal(err)
 	}
 	if len(p.CreatedLoadBalancers) != 1 || len(p.UpdatedLoadBalancers) != 1 || len(p.UpdatedLoadBalancers[0].Backends) != 4 {
 		t.Fatalf("created %+v, updated %+v", p.CreatedLoadBalancers, p.UpdatedLoadBalancers)
 	}
-	if err := runCommand(NewDelete(cp.Client(), clusters(p)), withRequest(deleteLeased())); err != nil {
+	if err := runCommand(NewDelete(cp.Client(), clusters(p)), deleteLeased()); err != nil {
 		t.Fatal(err)
 	}
 	if len(p.LoadBalancers) != 0 {
@@ -158,9 +157,9 @@ func TestRun_WithARequest_AFailedWrite_ReportsNothing(t *testing.T) {
 	p.UpdateLoadBalancerErr = api.StatusErrorf(http.StatusInternalServerError, "busy")
 	p.DeleteLoadBalancerErr = api.StatusErrorf(http.StatusInternalServerError, "busy")
 
-	createErr := runCommand(NewCreate(cp.Client(), clusters(fresh)), withRequest(createLeased()))
-	updateErr := runCommand(NewUpdate(cp.Client(), clusters(p)), withRequest(updateLeased()))
-	deleteErr := runCommand(NewDelete(cp.Client(), clusters(p)), withRequest(deleteLeased()))
+	createErr := runCommand(NewCreate(cp.Client(), clusters(fresh)), createLeased())
+	updateErr := runCommand(NewUpdate(cp.Client(), clusters(p)), updateLeased())
+	deleteErr := runCommand(NewDelete(cp.Client(), clusters(p)), deleteLeased())
 
 	if createErr == nil || updateErr == nil || deleteErr == nil || len(cp.Requests()) != 0 {
 		t.Fatalf("create %v, update %v, delete %v, requests %+v", createErr, updateErr, deleteErr, cp.Requests())
@@ -176,7 +175,7 @@ func TestCreate_WithARequest_GiveUp_EndsItFailed_CarryingTheVipOnlyWhenIncusHasI
 			withVip(p)
 		}
 
-		err := giveUpCommand(NewCreate(cp.Client(), clusters(p)), withRequest(createLeased()), errors.New("raw"))
+		err := giveUpCommand(NewCreate(cp.Client(), clusters(p)), createLeased(), errors.New("raw"))
 
 		if err != nil {
 			t.Fatal(err)
@@ -208,7 +207,7 @@ func TestGiveUps_WithARequest_VipReadFails_AreRetryable_AndReportNothing(t *test
 		p := withVip(withVms())
 		p.GetLoadBalancerErr = api.StatusErrorf(http.StatusInternalServerError, "busy")
 
-		err := giveUpCommand(c.handler(cp, p), withRequest(c.leased), errors.New("raw"))
+		err := giveUpCommand(c.handler(cp, p), c.leased, errors.New("raw"))
 
 		if err == nil || !command.IsRetryable(err) {
 			t.Errorf("%s: want retryable, got %v", c.name, err)
@@ -234,7 +233,7 @@ func TestGiveUps_WithARequest_OnAClusterTheWorkerIsNotConfiguredFor_AreFailed_Wi
 	for _, c := range cases {
 		cp := testsupport.NewControlPlane(t)
 
-		err := giveUpCommand(c.handler(cp.Client()), withRequest(c.leased), errors.New("raw"))
+		err := giveUpCommand(c.handler(cp.Client()), c.leased, errors.New("raw"))
 
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
@@ -254,7 +253,7 @@ func TestUpdate_WithARequest_GiveUp_IsAlwaysFailed_WithoutReadingIncus(t *testin
 	p := withVip(withVms())
 	p.GetLoadBalancerErr = api.StatusErrorf(http.StatusInternalServerError, "busy")
 
-	err := giveUpCommand(NewUpdate(cp.Client(), clusters(p)), withRequest(updateLeased()), errors.New("raw"))
+	err := giveUpCommand(NewUpdate(cp.Client(), clusters(p)), updateLeased(), errors.New("raw"))
 
 	if err != nil {
 		t.Fatal(err)
@@ -279,7 +278,7 @@ func TestDelete_WithARequest_GiveUp_IsDone_WhenIncusNoLongerHasTheVip_ElseFailed
 			withVip(p)
 		}
 
-		err := NewDelete(cp.Client(), clusters(p)).GiveUp(context.Background(), withRequest(deleteLeased()), errors.New("in use"), logger)
+		err := NewDelete(cp.Client(), clusters(p)).GiveUp(context.Background(), deleteLeased(), errors.New("in use"), logger)
 
 		if err != nil {
 			t.Fatal(err)
@@ -316,7 +315,7 @@ func TestGiveUps_WithARequest_CutTheDetailAt1000Runes_NotBytes(t *testing.T) {
 		cp := testsupport.NewControlPlane(t)
 		p := withVip(withVms())
 
-		err := giveUpCommand(c.handler(cp, p), withRequest(c.leased), errors.New(long))
+		err := giveUpCommand(c.handler(cp, p), c.leased, errors.New(long))
 
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
@@ -329,67 +328,73 @@ func TestGiveUps_WithARequest_CutTheDetailAt1000Runes_NotBytes(t *testing.T) {
 	}
 }
 
-// A command the old control plane enqueued without a requestId keeps the old route until rollout phase 6
-// (titan-ops architecture/resource-lifecycle.md#rollout).
-func TestCommands_WithoutARequest_ReportOnTheOldRoute(t *testing.T) {
+// Every command of the control plane carries a requestId (titan-ops architecture/resource-lifecycle.md#callback-routes):
+// one without it is refused for good, before Incus or the control plane hears of it, and its give-up has nothing to end.
+func TestCommands_WithoutARequest_AreRefused_AndTouchNothing(t *testing.T) {
 	cases := []struct {
-		name       string
-		run        func(cp *testsupport.ControlPlane, p *testsupport.Provider) error
-		wantReport string
+		name    string
+		handler handlerOf
+		leased  command.Leased
 	}{
-		{"create", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return runCommand(NewCreate(cp.Client(), clusters(p)), createLeased())
-		}, "Created"},
-		{"create give-up", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return giveUpCommand(NewCreate(cp.Client(), clusters(p)), createLeased(), errors.New("x"))
-		}, "RequestFailed"},
-		{"update", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return runCommand(NewUpdate(cp.Client(), clusters(p)), updateLeased())
-		}, "Updated"},
-		{"update give-up", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return giveUpCommand(NewUpdate(cp.Client(), clusters(p)), updateLeased(), errors.New("x"))
-		}, "RequestFailed"},
-		{"delete", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return runCommand(NewDelete(cp.Client(), clusters(p)), deleteLeased())
-		}, "Deleted"},
-		// The old route keeps the old give-up: no read, RequestFailed even with the VIP gone.
-		{"delete give-up", func(cp *testsupport.ControlPlane, p *testsupport.Provider) error {
-			return giveUpCommand(NewDelete(cp.Client(), clusters(p)), deleteLeased(), errors.New("x"))
-		}, "RequestFailed"},
+		{"create", createHandler, createLeased()},
+		{"update", updateHandler, updateLeased()},
+		{"delete", deleteHandler, deleteLeased()},
+	}
+	without := map[string]func(payload map[string]any){
+		"key absent": func(payload map[string]any) { delete(payload, "requestId") },
+		"empty":      func(payload map[string]any) { payload["requestId"] = "" },
 	}
 	for _, c := range cases {
-		cp := testsupport.NewControlPlane(t)
+		for how, edit := range without {
+			cp := testsupport.NewControlPlane(t)
+			p := withVip(withVms())
+			l := withPayload(c.leased, edit)
 
-		if err := c.run(cp, withVms()); err != nil {
-			t.Fatalf("%s: %v", c.name, err)
-		}
-		if len(cp.RequestsTo(anyRequestRoute)) != 0 {
-			t.Errorf("%s: reports %+v", c.name, cp.Requests())
-			continue
-		}
-		if got := onlyBody(t, cp, statusRoute)["report"]; got != c.wantReport {
-			t.Errorf("%s: report %v, want %s", c.name, got, c.wantReport)
+			err := runCommand(c.handler(cp, p), l)
+
+			if err == nil || command.IsRetryable(err) {
+				t.Errorf("%s, %s: want a permanent error, got %v", c.name, how, err)
+			}
+			if p.Calls != 0 || len(cp.Requests()) != 0 {
+				t.Errorf("%s, %s: Incus calls %d, requests %+v", c.name, how, p.Calls, cp.Requests())
+			}
+
+			logger, logs := testsupport.NewLogCapture(t)
+			err = c.handler(cp, p).GiveUp(context.Background(), l, errors.New("raw"), logger)
+
+			if err != nil {
+				t.Errorf("%s, %s: give-up %v", c.name, how, err)
+			}
+			if p.Calls != 0 || len(cp.Requests()) != 0 {
+				t.Errorf("%s, %s: give-up Incus calls %d, requests %+v", c.name, how, p.Calls, cp.Requests())
+			}
+			if len(logs.Records("no request id; nothing to end")) != 1 {
+				t.Errorf("%s, %s: want one warning that nothing is ended", c.name, how)
+			}
 		}
 	}
 }
 
-// The old route keeps the old create give-up too: a VIP that cannot be read goes without its id, and the raw detail
-// is not cut.
-func TestCreate_WithoutARequest_GiveUp_VipReadFails_StillReportsRequestFailed_WithoutTheId(t *testing.T) {
+// A payload may still carry an intentId beside the requestId: the worker has no field for it and reads only the requestId.
+func TestUpdate_WithAnIntentIdBesideTheRequest_RunsAndEndsTheRequest(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withVip(withVms())
-	p.GetLoadBalancerErr = api.StatusErrorf(http.StatusInternalServerError, "busy")
-	long := strings.Repeat("é", controlplane.MaxDetail+10)
+	l := withPayload(updateLeased(), func(payload map[string]any) { payload["intentId"] = "11111111-2222-3333-4444-555555555555" })
 
-	err := giveUpCommand(NewCreate(cp.Client(), clusters(p)), createLeased(), errors.New(long))
+	err := runCommand(NewUpdate(cp.Client(), clusters(p)), l)
 
-	body := onlyBody(t, cp, statusRoute)
-	if _, hasId := body["externalId"]; err != nil || body["report"] != "RequestFailed" || hasId || body["detail"] != long {
-		t.Fatalf("err %v, report %v", err, body["report"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.UpdatedLoadBalancers) != 1 {
+		t.Fatalf("updated %+v", p.UpdatedLoadBalancers)
+	}
+	if body := requestEnd(t, cp); body["outcome"] != "Done" || len(body) != 1 {
+		t.Fatalf("report %v", body)
 	}
 }
 
-func TestReconcile_SendsOnTheObservationRoute_NeverTheOldOne(t *testing.T) {
+func TestReconcile_SendsOnTheObservationRoute(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	rows := []ReconcilableLoadBalancer{{Id: loadBalancerId, ProjectName: project, ExternalNetworkId: network, Vip: vip, CurrentExistence: "NotCreated"}}
 	encoded, _ := json.Marshal(rows)
@@ -401,8 +406,8 @@ func TestReconcile_SendsOnTheObservationRoute_NeverTheOldOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cp.RequestsTo(statusRoute)) != 0 {
-		t.Fatalf("the reconciler used the old route: %+v", cp.Requests())
+	if len(cp.Requests()) != 2 {
+		t.Fatalf("want the list and one observation, got %+v", cp.Requests())
 	}
 	body := onlyBody(t, cp, observationRoute)
 	if body["exists"] != true || len(body) != 1 {

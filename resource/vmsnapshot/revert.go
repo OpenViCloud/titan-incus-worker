@@ -14,7 +14,7 @@ import (
 
 // Revert runs vm-snapshot.revert: the instance's disk is put back to the snapshot, running or not (lab-storage 05).
 // Disk only: a full restore also puts back the snapshot's devices and config, which would attach or detach volumes
-// and resize the VM behind Titan's back. It ends the request Done (Reverted on the old route); giving up ends it Failed.
+// and resize the VM behind Titan's back. It ends the request Done; giving up ends it Failed.
 type Revert struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -41,9 +41,6 @@ func (h *Revert) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return err
 	}
-	if payload.RequestId == "" {
-		return sendStatus(ctx, h.cp, payload.VmId, payload.SnapshotId, statusReport{Report: reportReverted})
-	}
 	return endRequest(ctx, h.cp, payload.VmId, payload.SnapshotId, payload.RequestId, done(""))
 }
 
@@ -53,7 +50,8 @@ func (h *Revert) GiveUp(ctx context.Context, leased command.Leased, cause error,
 		return err
 	}
 	if payload.RequestId == "" {
-		return sendStatus(ctx, h.cp, payload.VmId, payload.SnapshotId, requestFailed(reasonRevertFailed, cause))
+		logger.Warn("no request id; nothing to end")
+		return nil
 	}
 	// Always Failed: Incus keeps no trace of a disk restore, so no read can prove one done.
 	end := failed("", reasonRevertFailed, cause)

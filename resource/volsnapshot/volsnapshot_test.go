@@ -48,15 +48,14 @@ func onlyBody(t *testing.T, cp *testsupport.ControlPlane, prefix string) map[str
 	return body
 }
 
-const snapshotPath = "PATCH /internal/volumes/" + volumeId + "/snapshots/" + snapshotId + "/status"
-
 func createLeased() command.Leased {
 	return leased("volume-snapshot.create", map[string]any{
-		"snapshotId": snapshotId, "volumeId": volumeId, "externalVolumeId": volumeName, "projectName": project,
+		"snapshotId": snapshotId, "requestId": requestId, "volumeId": volumeId, "externalVolumeId": volumeName,
+		"projectName": project,
 	})
 }
 
-func TestCreate_SnapshotsTheVolume_AndReportsCreatedWithVolumeSlashSnapshot(t *testing.T) {
+func TestCreate_SnapshotsTheVolume_AndEndsTheRequestDoneWithVolumeSlashSnapshot(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
@@ -68,13 +67,13 @@ func TestCreate_SnapshotsTheVolume_AndReportsCreatedWithVolumeSlashSnapshot(t *t
 	if len(p.CreatedVolumeSnapshots) != 1 || p.CreatedVolumeSnapshots[0] != project+"/"+volumeName+"/s"+encodedId {
 		t.Fatalf("snapshots: %v", p.CreatedVolumeSnapshots)
 	}
-	body := onlyBody(t, cp, snapshotPath)
-	if body["report"] != "Created" || body["externalId"] != volumeName+"/s"+encodedId {
+	body := onlyBody(t, cp, snapshotRequestRoute)
+	if body["outcome"] != "Done" || body["externalId"] != volumeName+"/s"+encodedId {
 		t.Fatalf("report: %v", body)
 	}
 }
 
-func TestCreate_SnapshotAlreadyThere_ReportsCreated(t *testing.T) {
+func TestCreate_SnapshotAlreadyThere_EndsTheRequestDone(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -85,46 +84,22 @@ func TestCreate_SnapshotAlreadyThere_ReportsCreated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a duplicate must not fail the create: %v", err)
 	}
-	if onlyBody(t, cp, snapshotPath)["report"] != "Created" {
-		t.Fatal("want Created")
+	if onlyBody(t, cp, snapshotRequestRoute)["outcome"] != "Done" {
+		t.Fatal("want Done")
 	}
 	if got := logs.Objects("already exists; treating it as ours"); len(got) != 1 {
 		t.Fatalf("want 1 line(s) %q, got %v", "already exists; treating it as ours", got)
 	}
 }
 
-func TestCreate_GiveUp_CarriesTheIdOnlyWhenTheSnapshotExists(t *testing.T) {
-	for _, exists := range []bool{true, false} {
-		cp := testsupport.NewControlPlane(t)
-		p := testsupport.NewProvider()
-		if exists {
-			p.VolumeSnapshots[project+"/"+volumeName+"/s"+encodedId] = true
-		}
-
-		err := NewCreate(cp.Client(), clusters(p)).GiveUp(context.Background(), createLeased(), errors.New("raw"), testsupport.DiscardLogger())
-
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := onlyBody(t, cp, snapshotPath)
-		wantId := ""
-		if exists {
-			wantId = volumeName + "/s" + encodedId
-		}
-		gotId, _ := body["externalId"].(string)
-		if body["report"] != "RequestFailed" || body["reason"] != reasonCreateFailed || body["detail"] != "raw" || gotId != wantId {
-			t.Fatalf("exists=%v: report %v", exists, body)
-		}
-	}
-}
-
 func deleteLeased(externalSnapshotId string) command.Leased {
 	return leased("volume-snapshot.delete", map[string]any{
-		"snapshotId": snapshotId, "volumeId": volumeId, "externalSnapshotId": externalSnapshotId, "projectName": project,
+		"snapshotId": snapshotId, "requestId": requestId, "volumeId": volumeId, "externalSnapshotId": externalSnapshotId,
+		"projectName": project,
 	})
 }
 
-func TestDelete_DeletesTheNamedSnapshot_AndAGoneOne_ReportsDeleted(t *testing.T) {
+func TestDelete_DeletesTheNamedSnapshot_AndAGoneOne_EndsTheRequestDone(t *testing.T) {
 	for _, gone := range []bool{false, true} {
 		cp := testsupport.NewControlPlane(t)
 		logger, logs := testsupport.NewLogCapture(t)
@@ -141,8 +116,8 @@ func TestDelete_DeletesTheNamedSnapshot_AndAGoneOne_ReportsDeleted(t *testing.T)
 		if len(p.DeletedVolumeSnapshots) != 1 || p.DeletedVolumeSnapshots[0] != project+"/"+volumeName+"/sone" {
 			t.Fatalf("deleted: %v", p.DeletedVolumeSnapshots)
 		}
-		if onlyBody(t, cp, snapshotPath)["report"] != "Deleted" {
-			t.Fatalf("gone=%v: want Deleted", gone)
+		if onlyBody(t, cp, snapshotRequestRoute)["outcome"] != "Done" {
+			t.Fatalf("gone=%v: want Done", gone)
 		}
 		wantGoneLines := 0
 		if gone {
@@ -164,27 +139,27 @@ func TestDelete_IdWithoutAVolume_IsPermanent(t *testing.T) {
 	}
 }
 
-func TestDelete_GiveUp_ReportsRequestFailed(t *testing.T) {
+func TestDelete_GiveUp_EndsTheRequestFailed_WithTheRawErrorAsDetail(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
 	err := NewDelete(cp.Client(), clusters(testsupport.NewProvider())).GiveUp(context.Background(), deleteLeased(volumeName+"/sone"), errors.New("raw"), testsupport.DiscardLogger())
 
-	body := onlyBody(t, cp, snapshotPath)
-	if err != nil || body["report"] != "RequestFailed" || body["reason"] != reasonDeleteFailed || body["detail"] != "raw" {
+	body := onlyBody(t, cp, snapshotRequestRoute)
+	if err != nil || body["outcome"] != "Failed" || body["reason"] != reasonDeleteFailed || body["detail"] != "raw" {
 		t.Fatalf("err %v, report %v", err, body)
 	}
 }
 
 func restoreLeased() command.Leased {
 	return leased("volume-snapshot.restore", map[string]any{
-		"snapshotId": "77777777-7777-7777-7777-777777777777", "newVolumeId": newVolumeId, "externalSnapshotId": volumeName + "/sone",
-		"name": "restored-1", "projectName": project,
+		"snapshotId": "77777777-7777-7777-7777-777777777777", "newVolumeId": newVolumeId, "requestId": requestId,
+		"externalSnapshotId": volumeName + "/sone", "name": "restored-1", "projectName": project,
 	})
 }
 
-const newVolumePath = "PATCH /internal/volumes/" + newVolumeId + "/status"
+const newVolumeRoute = "PATCH /internal/volumes/" + newVolumeId + "/requests/" + requestId
 
-func TestRestore_CopiesTheSnapshotIntoTheNewVolume_KeepingTheDisplayName_AndReportsOnTheNewVolume(t *testing.T) {
+func TestRestore_CopiesTheSnapshotIntoTheNewVolume_KeepingTheDisplayName_AndEndsTheNewVolumesCreate(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
 
@@ -202,8 +177,8 @@ func TestRestore_CopiesTheSnapshotIntoTheNewVolume_KeepingTheDisplayName_AndRepo
 	if !isAsAsked {
 		t.Fatalf("copy: %+v", copied)
 	}
-	body := onlyBody(t, cp, newVolumePath)
-	if body["report"] != "Created" || body["externalId"] != "vol"+encodedId {
+	body := onlyBody(t, cp, newVolumeRoute)
+	if body["outcome"] != "Done" || body["externalId"] != "vol"+encodedId {
 		t.Fatalf("report: %v", body)
 	}
 	if len(cp.RequestsTo("PATCH /internal/volumes/"+volumeId)) != 0 {
@@ -211,7 +186,7 @@ func TestRestore_CopiesTheSnapshotIntoTheNewVolume_KeepingTheDisplayName_AndRepo
 	}
 }
 
-func TestRestore_NewVolumeAlreadyThere_ReportsCreated(t *testing.T) {
+func TestRestore_NewVolumeAlreadyThere_EndsTheNewVolumesCreateDone(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
 	p := testsupport.NewProvider()
@@ -219,7 +194,7 @@ func TestRestore_NewVolumeAlreadyThere_ReportsCreated(t *testing.T) {
 
 	err := NewRestore(cp.Client(), clusters(p)).Run(context.Background(), restoreLeased(), logger)
 
-	if err != nil || onlyBody(t, cp, newVolumePath)["report"] != "Created" {
+	if err != nil || onlyBody(t, cp, newVolumeRoute)["outcome"] != "Done" {
 		t.Fatalf("err %v", err)
 	}
 	if got := logs.Objects("already exists; treating it as ours"); len(got) != 1 {
@@ -227,13 +202,13 @@ func TestRestore_NewVolumeAlreadyThere_ReportsCreated(t *testing.T) {
 	}
 }
 
-func TestRestore_GiveUp_ReportsRequestFailedOnTheNewVolume(t *testing.T) {
+func TestRestore_GiveUp_EndsTheNewVolumesCreateFailed_WithTheRawErrorAsDetail(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
 	err := NewRestore(cp.Client(), clusters(testsupport.NewProvider())).GiveUp(context.Background(), restoreLeased(), errors.New("raw"), testsupport.DiscardLogger())
 
-	body := onlyBody(t, cp, newVolumePath)
-	if err != nil || body["report"] != "RequestFailed" || body["reason"] != volume.ReasonCreateFailed || body["detail"] != "raw" {
+	body := onlyBody(t, cp, newVolumeRoute)
+	if err != nil || body["outcome"] != "Failed" || body["reason"] != volume.ReasonCreateFailed || body["detail"] != "raw" {
 		t.Fatalf("err %v, report %v", err, body)
 	}
 }
