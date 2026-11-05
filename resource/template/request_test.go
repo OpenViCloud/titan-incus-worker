@@ -359,10 +359,11 @@ func TestSync_GiveUp_WithoutARequestOrATemplate_SaysThereIsNoRequest(t *testing.
 	delete(payload, "templateId")
 	l.Payload, _ = json.Marshal(payload)
 
-	err := syncWith(cp, withAlias(testsupport.NewProvider())).GiveUp(context.Background(), l, errors.New("raw"), logger)
+	p := withAlias(testsupport.NewProvider())
+	err := syncWith(cp, p).GiveUp(context.Background(), l, errors.New("raw"), logger)
 
-	if err != nil || len(cp.Requests()) != 0 {
-		t.Fatalf("give-up: %v, reports %+v", err, cp.Requests())
+	if err != nil || len(cp.Requests()) != 0 || p.Calls != 0 {
+		t.Fatalf("give-up: %v, reports %+v, Incus calls %d", err, cp.Requests(), p.Calls)
 	}
 	if got := logs.Records("no request id; nothing to end"); len(got) != 1 {
 		t.Fatalf("want one give-up line, got %v", got)
