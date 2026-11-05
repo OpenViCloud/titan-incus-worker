@@ -349,6 +349,26 @@ func TestSync_WithoutARequest_FailsForGood_AndCallsNothing(t *testing.T) {
 	}
 }
 
+// With no request there is nothing to end, whatever else the payload lacks: the give-up says so before anything else.
+func TestSync_GiveUp_WithoutARequestOrATemplate_SaysThereIsNoRequest(t *testing.T) {
+	cp := testsupport.NewControlPlane(t)
+	logger, logs := testsupport.NewLogCapture(t)
+	l := withoutRequest(syncLeased(), false)
+	var payload map[string]any
+	_ = json.Unmarshal(l.Payload, &payload)
+	delete(payload, "templateId")
+	l.Payload, _ = json.Marshal(payload)
+
+	err := syncWith(cp, withAlias(testsupport.NewProvider())).GiveUp(context.Background(), l, errors.New("raw"), logger)
+
+	if err != nil || len(cp.Requests()) != 0 {
+		t.Fatalf("give-up: %v, reports %+v", err, cp.Requests())
+	}
+	if got := logs.Records("no request id; nothing to end"); len(got) != 1 {
+		t.Fatalf("want one give-up line, got %v", got)
+	}
+}
+
 func TestReconcile_SendsOnTheObservationRoute(t *testing.T) {
 	for _, there := range []bool{true, false} {
 		cp := testsupport.NewControlPlane(t)
