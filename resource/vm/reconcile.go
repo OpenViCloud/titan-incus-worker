@@ -68,7 +68,7 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 			recordedState = *row.CurrentState
 		}
 		logger.Info("reconcile report sent", "vmId", row.Id, "recordedState", recordedState,
-			"recordedExistence", row.CurrentExistence, "exists", *report.Exists, "status", report.Status,
+			"recordedExistence", row.CurrentExistence, "exists", report.Exists, "status", report.Status,
 			"ipAddress", report.IpAddress, "publicIpv6Address", report.PublicIpv6Address)
 	}
 	return nil
@@ -80,14 +80,12 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 func DecideReport(row ReconcilableVm, byName map[string]api.InstanceFull) (statusReport, bool) {
 	instance, present := byName[row.ExternalId]
 	if !present {
-		absent := false
 		alreadyRecorded := row.CurrentExistence == existenceNotFound
-		return statusReport{Exists: &absent}, !alreadyRecorded
+		return statusReport{Exists: false}, !alreadyRecorded
 	}
 
-	exists := true
 	observed := statusReport{
-		Exists:            &exists,
+		Exists:            true,
 		Status:            instance.Status,
 		IpAddress:         firstGlobalIpv4(instance.State),
 		PublicIpv6Address: publicIpv6(instance.State),

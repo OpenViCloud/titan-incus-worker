@@ -49,7 +49,7 @@ func TestDecideReport_Running_CarriesTheFirstGlobalIpv4_SkippingLoopback(t *test
 
 	report, send := DecideReport(row, byName(instance))
 
-	if !send || !*report.Exists || report.Status != "Running" || report.IpAddress != "10.40.0.2" {
+	if !send || !report.Exists || report.Status != "Running" || report.IpAddress != "10.40.0.2" {
 		t.Fatalf("got %+v send=%v", report, send)
 	}
 }
@@ -212,7 +212,7 @@ func TestDecideReport_Absent_IsNotFound_NeverDeleted_AndNotRepeated(t *testing.T
 	report, send := DecideReport(row, byName())
 	_, sendAgain := DecideReport(recorded, byName())
 
-	if !send || *report.Exists || report.Status != "" {
+	if !send || report.Exists || report.Status != "" {
 		t.Fatalf("got %+v", report)
 	}
 	if sendAgain {
@@ -226,7 +226,7 @@ func TestDecideReport_SeenAgainAfterNotFound_IsReported(t *testing.T) {
 
 	report, send := DecideReport(recorded, byName(stopped))
 
-	if !send || !*report.Exists || report.Status != "Stopped" {
+	if !send || !report.Exists || report.Status != "Stopped" {
 		t.Fatalf("got %+v send=%v", report, send)
 	}
 }

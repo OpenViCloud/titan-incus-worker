@@ -48,7 +48,7 @@ func sendRequestEnd(ctx context.Context, cp *controlplane.Client, vmId string, r
 }
 
 func sendObservation(ctx context.Context, cp *controlplane.Client, vmId string, report statusReport) error {
-	body := observationBody{Exists: report.Exists != nil && *report.Exists}
+	body := observationBody{Exists: report.Exists}
 	if body.Exists {
 		body.Observed = &observedBody{Status: report.Status, IpAddress: report.IpAddress, PublicIpv6Address: report.PublicIpv6Address}
 	}
@@ -76,10 +76,9 @@ func failedEnd(externalId string, reason string, cause error) requestEnd {
 
 // statusReport is what DecideReport hands to sendObservation. It carries the Incus status word for word
 // (titan-ops architecture/desired-and-current.md#provider-state-is-verbatim); whether the instance exists is its own
-// field (titan-ops architecture/desired-and-current.md#existence-axis), and a give-up is a request failure, not a state
-// (titan-ops architecture/desired-and-current.md#request-failure).
+// field (titan-ops architecture/desired-and-current.md#existence-axis).
 type statusReport struct {
-	Exists            *bool
+	Exists            bool
 	Status            string
 	IpAddress         string
 	PublicIpv6Address string

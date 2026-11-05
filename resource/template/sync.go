@@ -173,12 +173,12 @@ func (h *Sync) GiveUp(ctx context.Context, leased command.Leased, cause error, l
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	if payload.TemplateId == "" {
-		return command.Permanent(errors.New("template.sync payload lacks templateId: nobody to tell"))
-	}
 	if payload.RequestId == "" {
 		logger.Warn("no request id; nothing to end")
 		return nil
+	}
+	if payload.TemplateId == "" {
+		return command.Permanent(errors.New("template.sync payload lacks templateId: nobody to tell"))
 	}
 	alias, err := h.usableAlias(ctx, leased.ClusterId, provider.TemplateAlias(payload.TemplateId))
 	if err != nil {
