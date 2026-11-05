@@ -152,7 +152,12 @@ func TestGiveUps_WithARequest_AreDone_WhenIncusShowsWhatWasAsked_ElseFailed(t *t
 		body := requestEnd(t, cp)
 		names, observed := observedNames(body)
 		gotReason, _ := body["reason"].(string)
-		isAsWanted := body["outcome"] == c.wantOutcome && gotReason == c.wantReason &&
+		gotDetail, _ := body["detail"].(string)
+		wantDetail := ""
+		if c.wantOutcome == "Failed" {
+			wantDetail = "callback refused"
+		}
+		isAsWanted := body["outcome"] == c.wantOutcome && gotReason == c.wantReason && gotDetail == wantDetail &&
 			observed == (c.wantNames >= 0) && (c.wantNames < 0 || len(names) == c.wantNames)
 		if !isAsWanted {
 			t.Errorf("%s, volume there %v, used_by %v: report %v", c.kind, c.volumeThere, c.usedBy, body)
