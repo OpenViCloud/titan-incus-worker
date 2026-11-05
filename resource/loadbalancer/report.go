@@ -13,15 +13,6 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/loop/command"
 )
 
-// The reports of the old route, which UpdateLoadBalancerStatusCommandHandler maps onto the waiting request until rollout
-// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout; titan-ops features/load-balancer/design.md#lb-lifecycle).
-const (
-	reportCreated       = "Created"
-	reportUpdated       = "Updated"
-	reportRequestFailed = "RequestFailed"
-	reportDeleted       = "Deleted"
-)
-
 // Reason is returned verbatim to the tenant, so it carries only these fixed texts; the raw error goes to the
 // admin-only detail (titan-ops features/public-api/design.md#status-reason).
 const (
@@ -29,20 +20,6 @@ const (
 	reasonUpdateFailed = "Load balancer update failed due to a system error. Please try again or contact support."
 	reasonDeleteFailed = "Load balancer deletion failed due to a system error. Please try again or contact support."
 )
-
-// statusReport is the body of the old PATCH /internal/load-balancers/{id}/status, which a command without a request id
-// still uses.
-type statusReport struct {
-	Report     string `json:"report"`
-	ExternalId string `json:"externalId,omitempty"`
-	IntentId   string `json:"intentId,omitempty"`
-	Reason     string `json:"reason,omitempty"`
-	Detail     string `json:"detail,omitempty"`
-}
-
-func sendStatus(ctx context.Context, cp *controlplane.Client, loadBalancerId string, report statusReport) error {
-	return cp.Patch(ctx, loadBalancerPath(loadBalancerId)+"/status", report)
-}
 
 // RequestEnd is the body of PATCH /internal/load-balancers/{id}/requests/{requestId}: the report that ends the request
 // a command carries (titan-ops architecture/resource-lifecycle.md#callback-routes).

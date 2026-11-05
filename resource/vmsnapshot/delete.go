@@ -10,9 +10,8 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/loop/command"
 )
 
-// Delete runs vm-snapshot.delete and ends its request Done (Deleted on the old route). Giving up ends it Failed, which
-// gives the snapshot back (titan-ops architecture/desired-and-current.md#abandoned-request), unless Incus no longer has
-// the snapshot (RequestFailed on the old route, which reads nothing).
+// Delete runs vm-snapshot.delete and ends its request Done. Giving up ends it Failed, which gives the snapshot back
+// (titan-ops architecture/desired-and-current.md#abandoned-request), unless Incus no longer has the snapshot.
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -40,9 +39,6 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if isAlreadyGone {
 		logger.Info("already gone; nothing to delete", "object", provider.SnapshotId(instance, snapshot))
 	}
-	if payload.RequestId == "" {
-		return sendStatus(ctx, h.cp, payload.VmId, payload.SnapshotId, statusReport{Report: reportDeleted})
-	}
 	return endRequest(ctx, h.cp, payload.VmId, payload.SnapshotId, payload.RequestId, done(""))
 }
 
@@ -52,7 +48,8 @@ func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error,
 		return err
 	}
 	if payload.RequestId == "" {
-		return sendStatus(ctx, h.cp, payload.VmId, payload.SnapshotId, requestFailed(reasonDeleteFailed, cause))
+		logger.Warn("no request id; nothing to end")
+		return nil
 	}
 	gone, err := h.snapshotIsGone(ctx, leased.ClusterId, payload)
 	if err != nil {

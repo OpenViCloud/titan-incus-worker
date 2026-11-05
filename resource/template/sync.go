@@ -25,9 +25,7 @@ var errImageNotListed = errors.New("not in the image list")
 type syncPayload struct {
 	TemplateId string `json:"templateId"`
 	// RequestId names the sync request this command ends
-	// (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty on a command of the old control plane that
-	// the migration gave no id: it keeps the old reporting until rollout phase 6
-	// (titan-ops architecture/resource-lifecycle.md#rollout).
+	// (titan-ops architecture/resource-lifecycle.md#callback-routes).
 	RequestId      string `json:"requestId"`
 	Name           string `json:"name"`
 	Description    string `json:"description"`
@@ -38,8 +36,7 @@ type syncPayload struct {
 
 // Sync puts the template's VM image into the cluster under the template's alias: the distro's own image when
 // the template has an imageUrl, else osImageName pulled from the image server. It ends its request Done carrying the
-// alias (Created on the old route). Giving up ends it Failed, carrying the alias only when the cluster has it on its
-// own architecture (RequestFailed on the old route, which reads nothing).
+// alias. Giving up ends it Failed, carrying the alias only when the cluster has it on its own architecture.
 type Sync struct {
 	cp          *controlplane.Client
 	clusters    cluster.Clusters
@@ -55,9 +52,9 @@ func (h *Sync) Run(ctx context.Context, leased command.Leased, logger *slog.Logg
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	isComplete := payload.TemplateId != "" && payload.OsImageName != ""
+	isComplete := payload.TemplateId != "" && payload.RequestId != "" && payload.OsImageName != ""
 	if !isComplete {
-		return command.Permanent(errors.New("template.sync payload lacks templateId or osImageName"))
+		return command.Permanent(errors.New("template.sync payload lacks templateId, requestId or osImageName"))
 	}
 	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
@@ -83,13 +80,6 @@ func (h *Sync) Run(ctx context.Context, leased command.Leased, logger *slog.Logg
 	}
 	if err := ensureClusterArchitecture(ctx, cl.Provider, alias, payload.OsImageName); err != nil {
 		return err
-	}
-	if payload.RequestId == "" {
-		return sendStatus(ctx, h.cp, payload.TemplateId, statusReport{
-			Report:     reportCreated,
-			ClusterId:  leased.ClusterId,
-			ExternalId: alias,
-		})
 	}
 	return endRequest(ctx, h.cp, payload.TemplateId, leased.ClusterId, payload.RequestId, done(alias))
 }
@@ -183,16 +173,12 @@ func (h *Sync) GiveUp(ctx context.Context, leased command.Leased, cause error, l
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
+	if payload.RequestId == "" {
+		logger.Warn("no request id; nothing to end")
+		return nil
+	}
 	if payload.TemplateId == "" {
 		return command.Permanent(errors.New("template.sync payload lacks templateId: nobody to tell"))
-	}
-	if payload.RequestId == "" {
-		return sendStatus(ctx, h.cp, payload.TemplateId, statusReport{
-			Report:    reportRequestFailed,
-			ClusterId: leased.ClusterId,
-			Reason:    giveUpReason(cause),
-			Detail:    controlplane.Detail(cause),
-		})
 	}
 	alias, err := h.usableAlias(ctx, leased.ClusterId, provider.TemplateAlias(payload.TemplateId))
 	if err != nil {

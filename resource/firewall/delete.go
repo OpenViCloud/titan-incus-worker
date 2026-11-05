@@ -17,18 +17,16 @@ import (
 
 type deletePayload struct {
 	RuleId string `json:"ruleId"`
-	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
-	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
-	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes).
 	RequestId      string `json:"requestId"`
 	NetworkId      string `json:"networkId"`
 	ExternalRuleId string `json:"externalRuleId"`
 	ProjectName    string `json:"projectName"`
 }
 
-// Delete runs firewall-rule.delete: the rule's entry leaves its ACL, and the request ends Done (Deleted on the old
-// route). Giving up ends it Failed, which gives the rule back to the tenant
-// (titan-ops architecture/desired-and-current.md#abandoned-request), unless the ACL no longer has the rule.
+// Delete runs firewall-rule.delete: the rule's entry leaves its ACL, and the request ends Done. Giving up ends it
+// Failed, which gives the rule back to the tenant (titan-ops architecture/desired-and-current.md#abandoned-request),
+// unless the ACL no longer has the rule.
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -43,9 +41,9 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	isComplete := payload.RuleId != "" && payload.NetworkId != "" && payload.ProjectName != ""
+	isComplete := payload.RuleId != "" && payload.RequestId != "" && payload.NetworkId != "" && payload.ProjectName != ""
 	if !isComplete {
-		return command.Permanent(errors.New("firewall-rule.delete payload lacks ruleId, networkId or projectName"))
+		return command.Permanent(errors.New("firewall-rule.delete payload lacks ruleId, requestId, networkId or projectName"))
 	}
 	aclName, entry, ok := splitProviderId(payload.ExternalRuleId)
 	if !ok {
@@ -73,9 +71,6 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 			return err
 		}
 	}
-	if payload.RequestId == "" {
-		return sendStatus(ctx, h.cp, payload.NetworkId, payload.RuleId, statusReport{Report: reportDeleted})
-	}
 	return endRequest(ctx, h.cp, payload.NetworkId, payload.RuleId, payload.RequestId, done("", nil))
 }
 
@@ -99,12 +94,12 @@ func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
+	if payload.RequestId == "" {
+		logger.Warn("no request id; nothing to end")
+		return nil
+	}
 	if payload.RuleId == "" || payload.NetworkId == "" {
 		return command.Permanent(errors.New("firewall-rule.delete payload lacks ruleId or networkId: nobody to tell"))
-	}
-	if payload.RequestId == "" {
-		report := statusReport{Report: reportRequestFailed, Reason: reasonDeleteFailed, Detail: cause.Error()}
-		return sendStatus(ctx, h.cp, payload.NetworkId, payload.RuleId, report)
 	}
 	gone, err := h.ruleIsGone(ctx, leased.ClusterId, payload)
 	if err != nil {

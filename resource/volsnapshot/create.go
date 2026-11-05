@@ -15,9 +15,7 @@ import (
 // createPayload mirrors ProviderCommandQueue.EnqueueVolumeSnapshotCreateAsync.
 type createPayload struct {
 	SnapshotId string `json:"snapshotId"`
-	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
-	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
-	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes).
 	RequestId        string `json:"requestId"`
 	VolumeId         string `json:"volumeId"`
 	ExternalVolumeId string `json:"externalVolumeId"`
@@ -40,9 +38,10 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	isComplete := payload.SnapshotId != "" && payload.VolumeId != "" && payload.ExternalVolumeId != "" && payload.ProjectName != ""
+	isComplete := payload.SnapshotId != "" && payload.RequestId != "" && payload.VolumeId != "" &&
+		payload.ExternalVolumeId != "" && payload.ProjectName != ""
 	if !isComplete {
-		return command.Permanent(fmt.Errorf("volume-snapshot.create payload lacks snapshotId, volumeId, externalVolumeId or projectName"))
+		return command.Permanent(fmt.Errorf("volume-snapshot.create payload lacks snapshotId, requestId, volumeId, externalVolumeId or projectName"))
 	}
 	name, err := provider.SnapshotName(payload.SnapshotId)
 	if err != nil {
@@ -63,11 +62,7 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if isOurs {
 		logger.Info("already exists; treating it as ours", "object", externalId)
 	}
-	if payload.RequestId != "" {
-		return volume.EndSnapshotRequest(ctx, h.cp, payload.VolumeId, payload.SnapshotId, payload.RequestId, volume.Done(externalId, nil))
-	}
-	report := volume.StatusReport{Report: volume.ReportCreated, ExternalId: externalId}
-	return volume.SendSnapshotStatus(ctx, h.cp, payload.VolumeId, payload.SnapshotId, report)
+	return volume.EndSnapshotRequest(ctx, h.cp, payload.VolumeId, payload.SnapshotId, payload.RequestId, volume.Done(externalId, nil))
 }
 
 // GiveUp reports the request failed, with the provider id when the snapshot exists: then the create did happen.
@@ -76,13 +71,13 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	existing := h.existingSnapshot(ctx, leased.ClusterId, payload)
-	if payload.RequestId != "" {
-		end := volume.Failed(existing, nil, reasonCreateFailed, cause)
-		return volume.EndSnapshotRequest(ctx, h.cp, payload.VolumeId, payload.SnapshotId, payload.RequestId, end)
+	if payload.RequestId == "" {
+		logger.Warn("no request id; nothing to end")
+		return nil
 	}
-	report := volume.StatusReport{Report: volume.ReportRequestFailed, Reason: reasonCreateFailed, Detail: cause.Error(), ExternalId: existing}
-	return volume.SendSnapshotStatus(ctx, h.cp, payload.VolumeId, payload.SnapshotId, report)
+	existing := h.existingSnapshot(ctx, leased.ClusterId, payload)
+	end := volume.Failed(existing, nil, reasonCreateFailed, cause)
+	return volume.EndSnapshotRequest(ctx, h.cp, payload.VolumeId, payload.SnapshotId, payload.RequestId, end)
 }
 
 func (h *Create) existingSnapshot(ctx context.Context, clusterId string, payload createPayload) string {

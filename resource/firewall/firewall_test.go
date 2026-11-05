@@ -32,7 +32,7 @@ func leased(kind string, payload map[string]any) command.Leased {
 
 func createPayload(id string, direction string, protocol string, startPort any, endPort any, cidr string) map[string]any {
 	return map[string]any{
-		"ruleId": id, "networkId": networkId, "direction": direction, "protocol": protocol,
+		"ruleId": id, "requestId": requestId, "networkId": networkId, "direction": direction, "protocol": protocol,
 		"startPort": startPort, "endPort": endPort, "cidr": cidr, "externalNetworkId": "net-" + networkId,
 		"projectName": project,
 	}
@@ -44,7 +44,7 @@ func createLeased() command.Leased {
 
 func deleteLeased() command.Leased {
 	return leased("firewall-rule.delete", map[string]any{
-		"ruleId": ruleId, "networkId": networkId, "externalRuleId": aclName + "/" + ruleId,
+		"ruleId": ruleId, "requestId": requestId, "networkId": networkId, "externalRuleId": aclName + "/" + ruleId,
 		"projectName": project,
 	})
 }
@@ -57,19 +57,6 @@ func withAcl(rules ...api.NetworkACLRule) *testsupport.Provider {
 	}
 	p.PutACL(project, acl)
 	return p
-}
-
-func onlyBody(t *testing.T, cp *testsupport.ControlPlane, id string) map[string]any {
-	t.Helper()
-	requests := cp.RequestsTo("PATCH /internal/networks/" + networkId + "/firewall-rules/" + id)
-	if len(requests) != 1 {
-		t.Fatalf("want one report, got %+v", cp.Requests())
-	}
-	var body map[string]any
-	if err := json.Unmarshal([]byte(requests[0].Body), &body); err != nil {
-		t.Fatal(err)
-	}
-	return body
 }
 
 func clusters(p *testsupport.Provider) cluster.Fixed {
@@ -157,7 +144,7 @@ func TestAclRule_MapsAnIpv6Cidr_AndIcmpFollowsTheCidrsFamily(t *testing.T) {
 	}
 }
 
-func TestCreate_AddsTheRuleToTheNetworksAcl_AndReportsCreated(t *testing.T) {
+func TestCreate_AddsTheRuleToTheNetworksAcl_AndEndsTheRequestDone(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl()
 
@@ -170,8 +157,8 @@ func TestCreate_AddsTheRuleToTheNetworksAcl_AndReportsCreated(t *testing.T) {
 	if len(acl.Ingress) != 1 || acl.Ingress[0].Description != ruleId || acl.Ingress[0].DestinationPort != "22" {
 		t.Fatalf("ACL: %+v", acl.NetworkACLPut)
 	}
-	body := onlyBody(t, cp, ruleId)
-	if body["report"] != reportCreated || body["externalRuleId"] != aclName+"/"+ruleId {
+	body := requestEnd(t, cp)
+	if body["outcome"] != "Done" || body["externalId"] != aclName+"/"+ruleId {
 		t.Fatalf("report: %v", body)
 	}
 }
@@ -194,7 +181,7 @@ func TestCreate_TwoRules_BothStay(t *testing.T) {
 }
 
 // A lease after a run that wrote the rule: it is there already, nothing is written twice.
-func TestCreate_RuleAlreadyThere_WritesNothing_AndReportsCreated(t *testing.T) {
+func TestCreate_RuleAlreadyThere_WritesNothing_AndEndsTheRequestDone(t *testing.T) {
 	logger, logs := testsupport.NewLogCapture(t)
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl(api.NetworkACLRule{Action: "allow", Source: "10.40.0.0/24", Protocol: "tcp", DestinationPort: "22", Description: ruleId, State: "enabled"})
@@ -207,8 +194,8 @@ func TestCreate_RuleAlreadyThere_WritesNothing_AndReportsCreated(t *testing.T) {
 	if len(p.UpdatedACLs) != 0 {
 		t.Fatalf("wrote again: %+v", p.UpdatedACLs)
 	}
-	if onlyBody(t, cp, ruleId)["report"] != reportCreated {
-		t.Fatal("want Created")
+	if requestEnd(t, cp)["outcome"] != "Done" {
+		t.Fatal("want Done")
 	}
 	if got := logs.Objects("already exists; treating it as ours"); len(got) != 1 {
 		t.Fatalf("want 1 line(s) %q, got %v", "already exists; treating it as ours", got)
@@ -277,7 +264,7 @@ func TestCreate_PayloadWithoutProject_IsPermanent(t *testing.T) {
 	}
 }
 
-func TestCreate_GiveUp_ReportsRequestFailed_WithTheIdWhenTheRuleIsThere(t *testing.T) {
+func TestCreate_GiveUp_EndsTheRequestFailed_WithTheIdWhenTheRuleIsThere(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl(api.NetworkACLRule{Action: "allow", Description: ruleId, State: "enabled"})
 
@@ -286,14 +273,14 @@ func TestCreate_GiveUp_ReportsRequestFailed_WithTheIdWhenTheRuleIsThere(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := onlyBody(t, cp, ruleId)
-	if body["report"] != reportRequestFailed || body["externalRuleId"] != aclName+"/"+ruleId ||
+	body := requestEnd(t, cp)
+	if body["outcome"] != "Failed" || body["externalId"] != aclName+"/"+ruleId ||
 		body["reason"] != reasonCreateFailed || body["detail"] != "gave up" {
 		t.Fatalf("report: %v", body)
 	}
 }
 
-func TestCreate_GiveUp_RuleNotThere_ReportsWithoutAnId(t *testing.T) {
+func TestCreate_GiveUp_RuleNotThere_EndsTheRequestFailed_WithoutAnId(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl()
 
@@ -302,13 +289,13 @@ func TestCreate_GiveUp_RuleNotThere_ReportsWithoutAnId(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := onlyBody(t, cp, ruleId)
-	if body["report"] != reportRequestFailed || body["externalRuleId"] != nil || body["reason"] != reasonCreateFailed {
+	body := requestEnd(t, cp)
+	if body["outcome"] != "Failed" || body["externalId"] != nil || body["reason"] != reasonCreateFailed {
 		t.Fatalf("report: %v", body)
 	}
 }
 
-func TestDelete_RemovesOnlyThatRule_AndReportsDeleted(t *testing.T) {
+func TestDelete_RemovesOnlyThatRule_AndEndsTheRequestDone(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl(
 		api.NetworkACLRule{Action: "allow", Description: ruleId, State: "enabled"},
@@ -324,12 +311,12 @@ func TestDelete_RemovesOnlyThatRule_AndReportsDeleted(t *testing.T) {
 	if len(acl.Ingress) != 1 || acl.Ingress[0].Description != otherRule {
 		t.Fatalf("ACL: %+v", acl.Ingress)
 	}
-	if onlyBody(t, cp, ruleId)["report"] != reportDeleted {
-		t.Fatal("want Deleted")
+	if requestEnd(t, cp)["outcome"] != "Done" {
+		t.Fatal("want Done")
 	}
 }
 
-func TestDelete_RuleOrAclGone_ReportsDeleted_WithoutWriting(t *testing.T) {
+func TestDelete_RuleOrAclGone_EndsTheRequestDone_WithoutWriting(t *testing.T) {
 	for name, p := range map[string]*testsupport.Provider{"rule gone": withAcl(), "ACL gone": testsupport.NewProvider()} {
 		cp := testsupport.NewControlPlane(t)
 		logger, logs := testsupport.NewLogCapture(t)
@@ -342,8 +329,8 @@ func TestDelete_RuleOrAclGone_ReportsDeleted_WithoutWriting(t *testing.T) {
 		if len(p.UpdatedACLs) != 0 {
 			t.Fatalf("%s: wrote %+v", name, p.UpdatedACLs)
 		}
-		if onlyBody(t, cp, ruleId)["report"] != reportDeleted {
-			t.Fatalf("%s: want Deleted", name)
+		if requestEnd(t, cp)["outcome"] != "Done" {
+			t.Fatalf("%s: want Done", name)
 		}
 		if got := logs.Objects("already gone; nothing to delete"); len(got) != 1 {
 			t.Fatalf("%v: want one line %q, got %v", name, "already gone; nothing to delete", got)
@@ -351,7 +338,7 @@ func TestDelete_RuleOrAclGone_ReportsDeleted_WithoutWriting(t *testing.T) {
 	}
 }
 
-func TestDelete_WriteFails_DoesNotReportDeleted(t *testing.T) {
+func TestDelete_WriteFails_ReportsNothing(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl(api.NetworkACLRule{Action: "allow", Description: ruleId, State: "enabled"})
 	p.UpdateACLErr = errors.New("boom")
@@ -369,7 +356,8 @@ func TestDelete_WriteFails_DoesNotReportDeleted(t *testing.T) {
 func TestDelete_BadProviderId_IsPermanent(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 	p := withAcl()
-	payload := map[string]any{"ruleId": ruleId, "networkId": networkId, "externalRuleId": "no-slash", "projectName": project}
+	payload := map[string]any{"ruleId": ruleId, "requestId": requestId, "networkId": networkId, "externalRuleId": "no-slash",
+		"projectName": project}
 
 	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), leased("firewall-rule.delete", payload), testsupport.DiscardLogger())
 
@@ -378,7 +366,7 @@ func TestDelete_BadProviderId_IsPermanent(t *testing.T) {
 	}
 }
 
-func TestDelete_GiveUp_ReportsRequestFailed(t *testing.T) {
+func TestDelete_GiveUp_ClusterNotConfigured_EndsTheRequestFailed(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
 	err := NewDelete(cp.Client(), cluster.Fixed{}).GiveUp(context.Background(), deleteLeased(), errors.New("refused"), testsupport.DiscardLogger())
@@ -386,8 +374,8 @@ func TestDelete_GiveUp_ReportsRequestFailed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := onlyBody(t, cp, ruleId)
-	if body["report"] != reportRequestFailed || body["reason"] != reasonDeleteFailed || body["detail"] != "refused" {
+	body := requestEnd(t, cp)
+	if body["outcome"] != "Failed" || body["reason"] != reasonDeleteFailed || body["detail"] != "refused" {
 		t.Fatalf("report: %v", body)
 	}
 }

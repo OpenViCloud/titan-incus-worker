@@ -13,9 +13,7 @@ import (
 
 type deletePayload struct {
 	LoadBalancerId string `json:"loadBalancerId"`
-	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
-	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
-	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes).
 	RequestId         string `json:"requestId"`
 	ProjectName       string `json:"projectName"`
 	ExternalNetworkId string `json:"externalNetworkId"`
@@ -23,10 +21,9 @@ type deletePayload struct {
 }
 
 // Delete runs load-balancer.delete: the VIP leaves its network; one already gone is done. It ends its request Done
-// (Deleted on the old route; only this command reports it,
-// titan-ops architecture/desired-and-current.md#forget-on-provider-confirm). Giving up ends it Failed, which gives the
-// load balancer back (titan-ops architecture/desired-and-current.md#abandoned-request), unless Incus no longer has
-// the VIP (RequestFailed on the old route, which reads nothing).
+// (only this command reports it, titan-ops architecture/desired-and-current.md#forget-on-provider-confirm). Giving up
+// ends it Failed, which gives the load balancer back (titan-ops architecture/desired-and-current.md#abandoned-request),
+// unless Incus no longer has the VIP.
 type Delete struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -41,9 +38,10 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	isComplete := payload.LoadBalancerId != "" && payload.ProjectName != "" && payload.ExternalNetworkId != "" && payload.Vip != ""
+	isComplete := payload.LoadBalancerId != "" && payload.RequestId != "" && payload.ProjectName != "" &&
+		payload.ExternalNetworkId != "" && payload.Vip != ""
 	if !isComplete {
-		return command.Permanent(errors.New("load-balancer.delete payload lacks loadBalancerId, projectName, externalNetworkId or vip"))
+		return command.Permanent(errors.New("load-balancer.delete payload lacks loadBalancerId, requestId, projectName, externalNetworkId or vip"))
 	}
 	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
@@ -57,9 +55,6 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if alreadyGone {
 		logger.Info("already gone; nothing to delete", "object", payload.Vip)
 	}
-	if payload.RequestId == "" {
-		return sendStatus(ctx, h.cp, payload.LoadBalancerId, statusReport{Report: reportDeleted})
-	}
 	return endRequest(ctx, h.cp, payload.LoadBalancerId, payload.RequestId, done(""))
 }
 
@@ -68,12 +63,12 @@ func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
+	if payload.RequestId == "" {
+		logger.Warn("no request id; nothing to end")
+		return nil
+	}
 	if payload.LoadBalancerId == "" {
 		return command.Permanent(errors.New("load-balancer.delete payload lacks loadBalancerId: nobody to tell"))
-	}
-	if payload.RequestId == "" {
-		report := statusReport{Report: reportRequestFailed, Reason: reasonDeleteFailed, Detail: cause.Error()}
-		return sendStatus(ctx, h.cp, payload.LoadBalancerId, report)
 	}
 	gone, err := h.vipIsGone(ctx, leased.ClusterId, payload)
 	if err != nil {

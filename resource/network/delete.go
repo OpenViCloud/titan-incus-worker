@@ -13,15 +13,13 @@ import (
 
 type deletePayload struct {
 	NetworkId string `json:"networkId"`
-	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
-	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
-	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes).
 	RequestId         string `json:"requestId"`
 	ExternalNetworkId string `json:"externalNetworkId"`
 	ProjectName       string `json:"projectName"`
 }
 
-// Delete runs network.delete and ends its request Done (Deleted on the old route). Giving up ends it Failed, which
+// Delete runs network.delete and ends its request Done. Giving up ends it Failed, which
 // gives the network back to the tenant (titan-ops architecture/desired-and-current.md#abandoned-request), unless Incus
 // no longer has the network nor its ACL.
 type Delete struct {
@@ -38,9 +36,10 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	isComplete := payload.NetworkId != "" && payload.ExternalNetworkId != "" && payload.ProjectName != ""
+	isComplete := payload.NetworkId != "" && payload.RequestId != "" && payload.ExternalNetworkId != "" &&
+		payload.ProjectName != ""
 	if !isComplete {
-		return command.Permanent(errors.New("network.delete payload lacks networkId, externalNetworkId or projectName"))
+		return command.Permanent(errors.New("network.delete payload lacks networkId, requestId, externalNetworkId or projectName"))
 	}
 	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
@@ -64,9 +63,6 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if aclIsAlreadyGone {
 		logger.Info("already gone; nothing to delete", "object", aclName)
 	}
-	if payload.RequestId == "" {
-		return sendStatus(ctx, h.cp, payload.NetworkId, statusReport{Report: reportDeleted})
-	}
 	return endRequest(ctx, h.cp, payload.NetworkId, payload.RequestId, done("", nil))
 }
 
@@ -75,12 +71,12 @@ func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
+	if payload.RequestId == "" {
+		logger.Warn("no request id; nothing to end")
+		return nil
+	}
 	if payload.NetworkId == "" {
 		return command.Permanent(errors.New("network.delete payload lacks networkId: nobody to tell"))
-	}
-	if payload.RequestId == "" {
-		report := statusReport{Report: reportRequestFailed, Reason: reasonDeleteFailed, Detail: cause.Error()}
-		return sendStatus(ctx, h.cp, payload.NetworkId, report)
 	}
 	gone, err := h.networkIsGone(ctx, leased.ClusterId, payload)
 	if err != nil {

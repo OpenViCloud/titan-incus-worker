@@ -20,9 +20,7 @@ const DisplayNameKey = "user.titan-name"
 // createPayload mirrors ProviderCommandQueue.EnqueueVolumeCreateAsync.
 type createPayload struct {
 	VolumeId string `json:"volumeId"`
-	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
-	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
-	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes).
 	RequestId   string `json:"requestId"`
 	Name        string `json:"name"`
 	SizeGb      int    `json:"sizeGb"`
@@ -45,9 +43,9 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	isComplete := payload.VolumeId != "" && payload.ProjectName != "" && payload.SizeGb > 0
+	isComplete := payload.VolumeId != "" && payload.RequestId != "" && payload.ProjectName != "" && payload.SizeGb > 0
 	if !isComplete {
-		return command.Permanent(fmt.Errorf("volume.create payload lacks volumeId, projectName or sizeGb"))
+		return command.Permanent(fmt.Errorf("volume.create payload lacks volumeId, requestId, projectName or sizeGb"))
 	}
 	name, err := provider.VolumeName(payload.VolumeId)
 	if err != nil {
@@ -79,9 +77,6 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if isOurs {
 		logger.Info("already exists; treating it as ours", "object", name)
 	}
-	if payload.RequestId == "" {
-		return SendStatus(ctx, h.cp, payload.VolumeId, StatusReport{Report: ReportCreated, ExternalId: name})
-	}
 	pool := provider.StoragePoolOrDefault(cl.StoragePool)
 	observed := ReadObservation(ctx, cl.Provider, payload.ProjectName, pool, name, logger)
 	return EndRequest(ctx, h.cp, payload.VolumeId, payload.RequestId, Done(name, observed))
@@ -93,12 +88,12 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	existing := ExistingVolume(ctx, h.clusters, leased.ClusterId, payload.ProjectName, payload.VolumeId)
-	if payload.RequestId != "" {
-		return EndRequest(ctx, h.cp, payload.VolumeId, payload.RequestId, Failed(existing, nil, ReasonCreateFailed, cause))
+	if payload.RequestId == "" {
+		logger.Warn("no request id; nothing to end")
+		return nil
 	}
-	report := StatusReport{Report: ReportRequestFailed, Reason: ReasonCreateFailed, Detail: cause.Error(), ExternalId: existing}
-	return SendStatus(ctx, h.cp, payload.VolumeId, report)
+	existing := ExistingVolume(ctx, h.clusters, leased.ClusterId, payload.ProjectName, payload.VolumeId)
+	return EndRequest(ctx, h.cp, payload.VolumeId, payload.RequestId, Failed(existing, nil, ReasonCreateFailed, cause))
 }
 
 // ReadObservation reads the volume once after a command did its work. A read that fails does not undo that work, so the

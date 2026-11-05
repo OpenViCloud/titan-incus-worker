@@ -12,9 +12,8 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/loop/command"
 )
 
-// Create runs firewall-rule.create: the rule goes into its network's ACL. With a request id it ends the request Done
-// with the provider id and the rule's state as the ACL then shows it; without one it reports Created on the old route,
-// and the reconciler reports the state.
+// Create runs firewall-rule.create: the rule goes into its network's ACL, and the request ends Done with the provider
+// id and the rule's state as the ACL then shows it.
 type Create struct {
 	cp       *controlplane.Client
 	clusters cluster.Clusters
@@ -65,10 +64,6 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 		}
 	}
 	externalId := ProviderId(aclName, payload.RuleId)
-	if payload.RequestId == "" {
-		report := statusReport{Report: reportCreated, ExternalRuleId: externalId}
-		return sendStatus(ctx, h.cp, payload.NetworkId, payload.RuleId, report)
-	}
 	var observed *Observation
 	if alreadyThere {
 		observed = &Observation{State: state}
@@ -95,24 +90,20 @@ func readObservation(ctx context.Context, p provider.Provider, project string, a
 	return &Observation{State: state}
 }
 
-// GiveUp ends the request Failed (RequestFailed on the old route), with the provider id when the rule is in the ACL so
-// its delete still reaches Incus.
+// GiveUp ends the request Failed, with the provider id when the rule is in the ACL so its delete still reaches Incus.
 func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
 	var payload CreatePayload
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
+	if payload.RequestId == "" {
+		logger.Warn("no request id; nothing to end")
+		return nil
+	}
 	if payload.RuleId == "" || payload.NetworkId == "" {
 		return command.Permanent(errors.New("firewall-rule.create payload lacks ruleId or networkId: nobody to tell"))
 	}
 	aclName := provider.NetworkAclName(payload.NetworkId)
-	if payload.RequestId == "" {
-		report := statusReport{Report: reportRequestFailed, Reason: reasonCreateFailed, Detail: cause.Error()}
-		if h.ruleExists(ctx, leased.ClusterId, payload.ProjectName, aclName, payload.RuleId) {
-			report.ExternalRuleId = ProviderId(aclName, payload.RuleId)
-		}
-		return sendStatus(ctx, h.cp, payload.NetworkId, payload.RuleId, report)
-	}
 	// Whether the rule is in the ACL decides whether the control plane keeps an id to delete it through: a read that
 	// failed answers neither, so the next lease gives up again.
 	exists, err := h.ruleIsThere(ctx, leased.ClusterId, payload.ProjectName, aclName, payload.RuleId)
@@ -125,12 +116,6 @@ func (h *Create) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	}
 	end := failed(externalId, reasonCreateFailed, cause)
 	return endRequest(ctx, h.cp, payload.NetworkId, payload.RuleId, payload.RequestId, end)
-}
-
-// ruleExists is the old route's read: any failure reads as "not there".
-func (h *Create) ruleExists(ctx context.Context, clusterId string, project string, aclName string, ruleId string) bool {
-	exists, err := h.ruleIsThere(ctx, clusterId, project, aclName, ruleId)
-	return err == nil && exists
 }
 
 func (h *Create) ruleIsThere(ctx context.Context, clusterId string, project string, aclName string,
@@ -154,9 +139,9 @@ func decodeCreate(leased command.Leased) (CreatePayload, error) {
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return CreatePayload{}, err
 	}
-	isComplete := payload.RuleId != "" && payload.NetworkId != "" && payload.ProjectName != ""
+	isComplete := payload.RuleId != "" && payload.RequestId != "" && payload.NetworkId != "" && payload.ProjectName != ""
 	if !isComplete {
-		return CreatePayload{}, command.Permanent(errors.New("firewall-rule.create payload lacks ruleId, networkId or projectName"))
+		return CreatePayload{}, command.Permanent(errors.New("firewall-rule.create payload lacks ruleId, requestId, networkId or projectName"))
 	}
 	return payload, nil
 }

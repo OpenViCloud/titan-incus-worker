@@ -16,12 +16,11 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
-// The commands here carry no requestId, so they report on the old route; request_test.go has the ones that do. The
+// The commands here carry a requestId and end it on its route; request_test.go has the outcomes of that route. The
 // reconciler tests here report on the observation route.
 
 const (
 	loadBalancerId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	intentId       = "11111111-2222-3333-4444-555555555555"
 	project        = "t-0123456789abcdef0123456789abcdef"
 	clusterId      = "local-mac"
 	network        = "net-99999999-8888-7777-6666-555555555555"
@@ -29,7 +28,7 @@ const (
 	vip            = "2001:db8:42:101::1:1"
 	vmA            = "vmaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	vmB            = "vmbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	// Measured on local-mac (NETWORK-LOAD-BALANCER Stage 0, M-L4): the guest of this MAC uses this address.
+	// Measured on local-mac: the guest of this MAC uses this address.
 	macA     = "10:66:6a:ed:72:93"
 	addressA = "2001:db8:42:101:1266:6aff:feed:7293"
 	macB     = "10:66:6a:20:d3:c6"
@@ -45,7 +44,7 @@ func leased(kind string, payload map[string]any) command.Leased {
 
 func specFields() map[string]any {
 	return map[string]any{
-		"loadBalancerId": loadBalancerId, "projectName": project, "externalNetworkId": network,
+		"loadBalancerId": loadBalancerId, "requestId": requestId, "projectName": project, "externalNetworkId": network,
 		"publicIpv6Subnet": subnet, "vip": vip,
 		"listeners": []map[string]any{
 			{"protocol": "tcp", "port": 80, "targetPort": 8080},
@@ -58,15 +57,10 @@ func specFields() map[string]any {
 	}
 }
 
-func updateFields() map[string]any {
-	payload := specFields()
-	payload["intentId"] = intentId
-	return payload
-}
-
 func deleteFields() map[string]any {
 	return map[string]any{
-		"loadBalancerId": loadBalancerId, "projectName": project, "externalNetworkId": network, "vip": vip,
+		"loadBalancerId": loadBalancerId, "requestId": requestId, "projectName": project, "externalNetworkId": network,
+		"vip": vip,
 	}
 }
 
@@ -79,11 +73,6 @@ func withVms() *testsupport.Provider {
 
 func clusters(p *testsupport.Provider) cluster.Fixed {
 	return cluster.Fixed{clusterId: {Provider: p}}
-}
-
-func reports(t *testing.T, cp *testsupport.ControlPlane, id string) []map[string]any {
-	t.Helper()
-	return bodiesTo(t, cp, "PATCH /internal/load-balancers/"+id+"/status")
 }
 
 func observations(t *testing.T, cp *testsupport.ControlPlane, id string) []map[string]any {
@@ -104,13 +93,13 @@ func bodiesTo(t *testing.T, cp *testsupport.ControlPlane, route string) []map[st
 	return bodies
 }
 
+// onlyReport reads the one report, which must be on the request route.
 func onlyReport(t *testing.T, cp *testsupport.ControlPlane) map[string]any {
 	t.Helper()
-	all := reports(t, cp, loadBalancerId)
-	if len(all) != 1 {
+	if len(cp.Requests()) != 1 {
 		t.Fatalf("want one report, got %+v", cp.Requests())
 	}
-	return all[0]
+	return onlyBody(t, cp, requestRoute)
 }
 
 // ---- the Incus shape (titan-ops features/load-balancer/design.md#lb-resource-model)
@@ -131,7 +120,7 @@ func TestEui64_IsTheAddressTheGuestOfThatMacUses(t *testing.T) {
 	}
 }
 
-func TestCreate_PostsOneBackendPerListenerAndVm_WithHealthCheck_AndReportsCreated(t *testing.T) {
+func TestCreate_PostsOneBackendPerListenerAndVm_WithHealthCheck_AndEndsTheRequestDone(t *testing.T) {
 	p := withVms()
 	cp := testsupport.NewControlPlane(t)
 
@@ -176,13 +165,13 @@ func TestCreate_PostsOneBackendPerListenerAndVm_WithHealthCheck_AndReportsCreate
 		}
 	}
 	report := onlyReport(t, cp)
-	if report["report"] != "Created" || report["externalId"] != vip {
+	if report["outcome"] != "Done" || report["externalId"] != vip {
 		t.Fatalf("report %v", report)
 	}
 }
 
 // A second lease of the same create (the first one's report got lost) finds the VIP and writes it again.
-func TestCreate_WhenIncusAlreadyHasTheVip_PutsIt_AndStillReportsCreated(t *testing.T) {
+func TestCreate_WhenIncusAlreadyHasTheVip_PutsIt_AndStillEndsTheRequestDone(t *testing.T) {
 	p := withVms()
 	p.PutLoadBalancer(project, network, api.NetworkLoadBalancer{ListenAddress: vip})
 	cp := testsupport.NewControlPlane(t)
@@ -195,8 +184,8 @@ func TestCreate_WhenIncusAlreadyHasTheVip_PutsIt_AndStillReportsCreated(t *testi
 	if len(p.CreatedLoadBalancers) != 0 || len(p.UpdatedLoadBalancers) != 1 {
 		t.Fatalf("created %d updated %d", len(p.CreatedLoadBalancers), len(p.UpdatedLoadBalancers))
 	}
-	if onlyReport(t, cp)["report"] != "Created" {
-		t.Fatal("want Created")
+	if onlyReport(t, cp)["outcome"] != "Done" {
+		t.Fatal("want Done")
 	}
 }
 
@@ -210,8 +199,8 @@ func TestCreate_ABackendWhoseInstanceIsGone_IsPermanent_AndWritesNothing(t *test
 	if err == nil || command.IsRetryable(err) {
 		t.Fatalf("want permanent, got %v", err)
 	}
-	if len(p.CreatedLoadBalancers)+len(p.UpdatedLoadBalancers) != 0 {
-		t.Fatal("nothing must reach Incus")
+	if len(p.CreatedLoadBalancers)+len(p.UpdatedLoadBalancers) != 0 || len(cp.Requests()) != 0 {
+		t.Fatalf("nothing must reach Incus or the control plane: requests %+v", cp.Requests())
 	}
 }
 
@@ -223,8 +212,8 @@ func TestCreate_ABackendWithNoMacYet_IsRetryable(t *testing.T) {
 
 	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.create", specFields()), discard)
 
-	if err == nil || !command.IsRetryable(err) {
-		t.Fatalf("want a retryable error, got %v", err)
+	if err == nil || !command.IsRetryable(err) || len(cp.Requests()) != 0 {
+		t.Fatalf("want a retryable error and no report, got %v, requests %+v", err, cp.Requests())
 	}
 }
 
@@ -236,7 +225,7 @@ func TestCreate_APayloadMissingTheVip_IsPermanent_AndTouchesNothing(t *testing.T
 
 	err := NewCreate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.create", payload), discard)
 
-	if err == nil || command.IsRetryable(err) || p.Calls != 0 {
+	if err == nil || command.IsRetryable(err) || p.Calls != 0 || len(cp.Requests()) != 0 {
 		t.Fatalf("err %v, provider calls %d", err, p.Calls)
 	}
 }
@@ -252,7 +241,7 @@ func TestCreate_GiveUp_WithTheVipOnIncus_SaysTheCreateHappened(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := onlyReport(t, cp)
-	if report["report"] != "RequestFailed" || report["externalId"] != vip || report["detail"] != "boom" {
+	if report["outcome"] != "Failed" || report["externalId"] != vip || report["detail"] != "boom" {
 		t.Fatalf("report %v", report)
 	}
 }
@@ -273,12 +262,12 @@ func TestCreate_GiveUp_WithNothingOnIncus_SendsNoId(t *testing.T) {
 
 // ---- update
 
-func TestUpdate_PutsTheWholeSpec_AndReportsUpdatedWithItsIntent(t *testing.T) {
+func TestUpdate_PutsTheWholeSpec_AndEndsItsRequestDone(t *testing.T) {
 	p := withVms()
 	p.PutLoadBalancer(project, network, api.NetworkLoadBalancer{ListenAddress: vip})
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewUpdate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.update", updateFields()), discard)
+	err := NewUpdate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.update", specFields()), discard)
 
 	if err != nil {
 		t.Fatal(err)
@@ -287,7 +276,7 @@ func TestUpdate_PutsTheWholeSpec_AndReportsUpdatedWithItsIntent(t *testing.T) {
 		t.Fatalf("updated %+v", p.UpdatedLoadBalancers)
 	}
 	report := onlyReport(t, cp)
-	if report["report"] != "Updated" || report["intentId"] != intentId {
+	if report["outcome"] != "Done" || len(report) != 1 {
 		t.Fatalf("report %v", report)
 	}
 }
@@ -297,45 +286,34 @@ func TestUpdate_WhenTheVipIsGone_CreatesIt(t *testing.T) {
 	p := withVms()
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewUpdate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.update", updateFields()), discard)
+	err := NewUpdate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.update", specFields()), discard)
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.CreatedLoadBalancers) != 1 || onlyReport(t, cp)["report"] != "Updated" {
+	if len(p.CreatedLoadBalancers) != 1 || onlyReport(t, cp)["outcome"] != "Done" {
 		t.Fatalf("created %+v, requests %+v", p.CreatedLoadBalancers, cp.Requests())
 	}
 }
 
-func TestUpdate_WithoutAnIntent_IsPermanent(t *testing.T) {
+func TestUpdate_GiveUp_EndsItsRequestFailed(t *testing.T) {
 	p := withVms()
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewUpdate(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.update", specFields()), discard)
-
-	if err == nil || command.IsRetryable(err) {
-		t.Fatalf("want permanent, got %v", err)
-	}
-}
-
-func TestUpdate_GiveUp_NamesItsIntent(t *testing.T) {
-	p := withVms()
-	cp := testsupport.NewControlPlane(t)
-
-	err := NewUpdate(cp.Client(), clusters(p)).GiveUp(context.Background(), leased("load-balancer.update", updateFields()), errors.New("boom"), discard)
+	err := NewUpdate(cp.Client(), clusters(p)).GiveUp(context.Background(), leased("load-balancer.update", specFields()), errors.New("boom"), discard)
 
 	if err != nil {
 		t.Fatal(err)
 	}
 	report := onlyReport(t, cp)
-	if report["report"] != "RequestFailed" || report["intentId"] != intentId || report["reason"] != reasonUpdateFailed {
+	if report["outcome"] != "Failed" || report["reason"] != reasonUpdateFailed || report["detail"] != "boom" {
 		t.Fatalf("report %v", report)
 	}
 }
 
 // ---- delete
 
-func TestDelete_RemovesTheVip_AndReportsDeleted(t *testing.T) {
+func TestDelete_RemovesTheVip_AndEndsTheRequestDone(t *testing.T) {
 	p := withVms()
 	p.PutLoadBalancer(project, network, api.NetworkLoadBalancer{ListenAddress: vip})
 	cp := testsupport.NewControlPlane(t)
@@ -345,18 +323,18 @@ func TestDelete_RemovesTheVip_AndReportsDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.LoadBalancers) != 0 || onlyReport(t, cp)["report"] != "Deleted" {
+	if len(p.LoadBalancers) != 0 || onlyReport(t, cp)["outcome"] != "Done" {
 		t.Fatalf("left %v, requests %+v", p.LoadBalancers, cp.Requests())
 	}
 }
 
-func TestDelete_AlreadyGone_StillReportsDeleted(t *testing.T) {
+func TestDelete_AlreadyGone_StillEndsTheRequestDone(t *testing.T) {
 	p := withVms()
 	cp := testsupport.NewControlPlane(t)
 
 	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.delete", deleteFields()), discard)
 
-	if err != nil || onlyReport(t, cp)["report"] != "Deleted" {
+	if err != nil || onlyReport(t, cp)["outcome"] != "Done" {
 		t.Fatalf("err %v requests %+v", err, cp.Requests())
 	}
 }
@@ -369,21 +347,21 @@ func TestDelete_IncusRefuses_ReportsNothing_AndIsRetried(t *testing.T) {
 
 	err := NewDelete(cp.Client(), clusters(p)).Run(context.Background(), leased("load-balancer.delete", deleteFields()), discard)
 
-	if err == nil || !command.IsRetryable(err) || len(reports(t, cp, loadBalancerId)) != 0 {
+	if err == nil || !command.IsRetryable(err) || len(cp.Requests()) != 0 {
 		t.Fatalf("err %v, requests %+v", err, cp.Requests())
 	}
 }
 
-func TestDelete_GiveUp_ReportsTheFailure(t *testing.T) {
+func TestDelete_GiveUp_WithTheVipStillOnIncus_EndsTheRequestFailed(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
 
-	err := NewDelete(cp.Client(), clusters(withVms())).GiveUp(context.Background(), leased("load-balancer.delete", deleteFields()), errors.New("boom"), discard)
+	err := NewDelete(cp.Client(), clusters(withVip(withVms()))).GiveUp(context.Background(), leased("load-balancer.delete", deleteFields()), errors.New("boom"), discard)
 
 	if err != nil {
 		t.Fatal(err)
 	}
 	report := onlyReport(t, cp)
-	if report["report"] != "RequestFailed" || report["reason"] != reasonDeleteFailed {
+	if report["outcome"] != "Failed" || report["reason"] != reasonDeleteFailed {
 		t.Fatalf("report %v", report)
 	}
 }

@@ -13,15 +13,13 @@ import (
 
 type deletePayload struct {
 	VolumeId string `json:"volumeId"`
-	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
-	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
-	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes).
 	RequestId        string `json:"requestId"`
 	ExternalVolumeId string `json:"externalVolumeId"`
 	ProjectName      string `json:"projectName"`
 }
 
-// Delete runs volume.delete and ends its request Done (Deleted on the old route). Incus refuses while the volume is
+// Delete runs volume.delete and ends its request Done. Incus refuses while the volume is
 // attached (400, lab-storage 04): an error the next lease may get past. Giving up ends it Failed, which gives the volume
 // back (titan-ops architecture/resource-lifecycle.md#kinds).
 type Delete struct {
@@ -38,9 +36,9 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	isComplete := payload.VolumeId != "" && payload.ExternalVolumeId != "" && payload.ProjectName != ""
+	isComplete := payload.VolumeId != "" && payload.RequestId != "" && payload.ExternalVolumeId != "" && payload.ProjectName != ""
 	if !isComplete {
-		return command.Permanent(fmt.Errorf("volume.delete payload lacks volumeId, externalVolumeId or projectName"))
+		return command.Permanent(fmt.Errorf("volume.delete payload lacks volumeId, requestId, externalVolumeId or projectName"))
 	}
 	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
@@ -56,9 +54,6 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if isAlreadyGone {
 		logger.Info("already gone; nothing to delete", "object", payload.ExternalVolumeId)
 	}
-	if payload.RequestId == "" {
-		return SendStatus(ctx, h.cp, payload.VolumeId, StatusReport{Report: ReportDeleted})
-	}
 	return EndRequest(ctx, h.cp, payload.VolumeId, payload.RequestId, Done("", nil))
 }
 
@@ -67,9 +62,9 @@ func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	if payload.RequestId != "" {
-		return EndRequest(ctx, h.cp, payload.VolumeId, payload.RequestId, Failed("", nil, reasonDeleteFailed, cause))
+	if payload.RequestId == "" {
+		logger.Warn("no request id; nothing to end")
+		return nil
 	}
-	report := StatusReport{Report: ReportRequestFailed, Reason: reasonDeleteFailed, Detail: cause.Error()}
-	return SendStatus(ctx, h.cp, payload.VolumeId, report)
+	return EndRequest(ctx, h.cp, payload.VolumeId, payload.RequestId, Failed("", nil, reasonDeleteFailed, cause))
 }

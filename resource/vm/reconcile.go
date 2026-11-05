@@ -60,7 +60,7 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 		if err != nil {
 			// One VM refused must not cost the rest their report; nothing changed on the Titan side, so the next
 			// cycle sends it again.
-			logger.Warn("VM report failed; next cycle sends it again", "vmId", row.Id, "report", report.Report, "status", report.Status, "error", err)
+			logger.Warn("VM report failed; next cycle sends it again", "vmId", row.Id, "status", report.Status, "error", err)
 			continue
 		}
 		recordedState := ""
@@ -68,8 +68,8 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 			recordedState = *row.CurrentState
 		}
 		logger.Info("reconcile report sent", "vmId", row.Id, "recordedState", recordedState,
-			"recordedExistence", row.CurrentExistence, "report", report.Report, "status", report.Status,
-			"ipAddress", report.IpAddress, "publicIpv6Address", report.PublicIpv6Address, "reason", report.Reason)
+			"recordedExistence", row.CurrentExistence, "exists", report.Exists, "status", report.Status,
+			"ipAddress", report.IpAddress, "publicIpv6Address", report.PublicIpv6Address)
 	}
 	return nil
 }
@@ -80,15 +80,12 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 func DecideReport(row ReconcilableVm, byName map[string]api.InstanceFull) (statusReport, bool) {
 	instance, present := byName[row.ExternalId]
 	if !present {
-		absent := false
 		alreadyRecorded := row.CurrentExistence == existenceNotFound
-		return statusReport{Report: reportObserved, Exists: &absent}, !alreadyRecorded
+		return statusReport{Exists: false}, !alreadyRecorded
 	}
 
-	exists := true
 	observed := statusReport{
-		Report:            reportObserved,
-		Exists:            &exists,
+		Exists:            true,
 		Status:            instance.Status,
 		IpAddress:         firstGlobalIpv4(instance.State),
 		PublicIpv6Address: publicIpv6(instance.State),

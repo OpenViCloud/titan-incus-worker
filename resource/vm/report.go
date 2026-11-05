@@ -10,18 +10,6 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 )
 
-// The words of the old route, UpdateVmStatusCommandHandler. Observed goes no further than DecideReport and the log:
-// sendObservation does not send it. An observation carries the Incus status word for word
-// (titan-ops architecture/desired-and-current.md#provider-state-is-verbatim); whether the instance exists is its own field
-// (titan-ops architecture/desired-and-current.md#existence-axis), and a give-up is a request failure, not a state
-// (titan-ops architecture/desired-and-current.md#request-failure).
-const (
-	reportObserved      = "Observed"
-	reportCreated       = "Created"
-	reportRequestFailed = "RequestFailed"
-	reportDeleted       = "Deleted"
-)
-
 // Reason is returned verbatim to the tenant, so it carries only these fixed texts; the raw error goes to the
 // admin-only detail (titan-ops features/public-api/design.md#status-reason).
 const (
@@ -60,7 +48,7 @@ func sendRequestEnd(ctx context.Context, cp *controlplane.Client, vmId string, r
 }
 
 func sendObservation(ctx context.Context, cp *controlplane.Client, vmId string, report statusReport) error {
-	body := observationBody{Exists: report.Exists != nil && *report.Exists}
+	body := observationBody{Exists: report.Exists}
 	if body.Exists {
 		body.Observed = &observedBody{Status: report.Status, IpAddress: report.IpAddress, PublicIpv6Address: report.PublicIpv6Address}
 	}
@@ -86,19 +74,12 @@ func failedEnd(externalId string, reason string, cause error) requestEnd {
 	return requestEnd{Outcome: controlplane.OutcomeFailed, ExternalId: externalId, Reason: reason, Detail: controlplane.Detail(cause)}
 }
 
-// statusReport is the body of the old PATCH /internal/vms/{vmId}/status, which a command without a request id still
-// uses, and what DecideReport hands to sendObservation.
+// statusReport is what DecideReport hands to sendObservation. It carries the Incus status word for word
+// (titan-ops architecture/desired-and-current.md#provider-state-is-verbatim); whether the instance exists is its own
+// field (titan-ops architecture/desired-and-current.md#existence-axis).
 type statusReport struct {
-	Report            string `json:"report"`
-	Exists            *bool  `json:"exists,omitempty"`
-	Status            string `json:"status,omitempty"`
-	ExternalId        string `json:"externalId,omitempty"`
-	IpAddress         string `json:"ipAddress,omitempty"`
-	PublicIpv6Address string `json:"publicIpv6Address,omitempty"`
-	Reason            string `json:"reason,omitempty"`
-	Detail            string `json:"detail,omitempty"`
-}
-
-func sendStatus(ctx context.Context, cp *controlplane.Client, vmId string, report statusReport) error {
-	return cp.Patch(ctx, "/internal/vms/"+url.PathEscape(vmId)+"/status", report)
+	Exists            bool
+	Status            string
+	IpAddress         string
+	PublicIpv6Address string
 }

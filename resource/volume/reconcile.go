@@ -88,14 +88,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, cp *controlplane.Client, p p
 		if !shouldReport || r.sentAlready(row, report) {
 			continue
 		}
-		err := sendObservation(ctx, cp, row.Id, *report.Exists, report.AttachedTo)
+		err := sendObservation(ctx, cp, row.Id, report.Exists, report.AttachedTo)
 		if err != nil {
 			logger.Warn("volume report failed; next cycle sends it again", "volumeId", row.Id, "error", err)
 			continue
 		}
 		r.remember(row, report)
 		logger.Info("reconcile report sent", "volumeId", row.Id, "recordedExistence", row.CurrentExistence,
-			"exists", *report.Exists, "attachedTo", report.AttachedTo)
+			"exists", report.Exists, "attachedTo", report.AttachedTo)
 	}
 
 	snapshotsByVolume := map[string]map[string]bool{}
@@ -121,20 +121,20 @@ func (r *Reconciler) Reconcile(ctx context.Context, cp *controlplane.Client, p p
 		if !shouldReport {
 			continue
 		}
-		err := sendSnapshotObservation(ctx, cp, row.VolumeId, row.Id, *report.Exists)
+		err := sendSnapshotObservation(ctx, cp, row.VolumeId, row.Id, report.Exists)
 		if err != nil {
 			logger.Warn("volume snapshot report failed; next cycle sends it again", "snapshotId", row.Id, "error", err)
 			continue
 		}
 		logger.Info("reconcile report sent", "snapshotId", row.Id, "volumeId", row.VolumeId,
-			"recordedExistence", row.CurrentExistence, "exists", *report.Exists)
+			"recordedExistence", row.CurrentExistence, "exists", report.Exists)
 	}
 	return nil
 }
 
 // sentAlready: a volume recorded as used outside Titan whose instances are the ones last reported has nothing new to say.
 func (r *Reconciler) sentAlready(row ReconcilableVolume, report StatusReport) bool {
-	if !row.CurrentAttachedElsewhere || !*report.Exists {
+	if !row.CurrentAttachedElsewhere || !report.Exists {
 		return false
 	}
 	r.mu.Lock()
@@ -148,7 +148,7 @@ func (r *Reconciler) sentAlready(row ReconcilableVolume, report StatusReport) bo
 func (r *Reconciler) remember(row ReconcilableVolume, report StatusReport) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !*report.Exists || len(report.AttachedTo) == 0 {
+	if !report.Exists || len(report.AttachedTo) == 0 {
 		delete(r.sentInUse, row.Id)
 		return
 	}

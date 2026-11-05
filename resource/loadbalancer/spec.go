@@ -28,15 +28,11 @@ type backend struct {
 	ExternalVmId string `json:"externalVmId"`
 }
 
-// specPayload is what load-balancer.create and load-balancer.update carry: the whole asked configuration. An update's
-// intentId equals its requestId; only the old route reads it.
+// specPayload is what load-balancer.create and load-balancer.update carry: the whole asked configuration.
 type specPayload struct {
 	LoadBalancerId string `json:"loadBalancerId"`
-	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
-	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
-	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes).
 	RequestId         string     `json:"requestId"`
-	IntentId          string     `json:"intentId"`
 	ProjectName       string     `json:"projectName"`
 	ExternalNetworkId string     `json:"externalNetworkId"`
 	PublicIpv6Subnet  string     `json:"publicIpv6Subnet"`
@@ -46,10 +42,10 @@ type specPayload struct {
 }
 
 func (p specPayload) check() error {
-	isComplete := p.LoadBalancerId != "" && p.ProjectName != "" && p.ExternalNetworkId != "" && p.PublicIpv6Subnet != "" &&
-		p.Vip != "" && len(p.Listeners) > 0 && len(p.Backends) > 0
+	isComplete := p.LoadBalancerId != "" && p.RequestId != "" && p.ProjectName != "" && p.ExternalNetworkId != "" &&
+		p.PublicIpv6Subnet != "" && p.Vip != "" && len(p.Listeners) > 0 && len(p.Backends) > 0
 	if !isComplete {
-		return command.Permanent(errors.New("load balancer payload lacks an id, project, network, subnet, VIP, listener or backend"))
+		return command.Permanent(errors.New("load balancer payload lacks an id, requestId, project, network, subnet, VIP, listener or backend"))
 	}
 	return nil
 }

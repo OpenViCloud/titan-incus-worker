@@ -15,16 +15,14 @@ import (
 // deletePayload mirrors EnqueueVolumeSnapshotDeleteAsync.
 type deletePayload struct {
 	SnapshotId string `json:"snapshotId"`
-	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes). Empty
-	// on a command of the old control plane that the migration gave no id: it keeps the old reporting until rollout
-	// phase 6 (titan-ops architecture/resource-lifecycle.md#rollout).
+	// RequestId names the request this command ends (titan-ops architecture/resource-lifecycle.md#callback-routes).
 	RequestId          string `json:"requestId"`
 	VolumeId           string `json:"volumeId"`
 	ExternalSnapshotId string `json:"externalSnapshotId"`
 	ProjectName        string `json:"projectName"`
 }
 
-// Delete runs volume-snapshot.delete and ends its request Done (Deleted on the old route); giving up ends it Failed,
+// Delete runs volume-snapshot.delete and ends its request Done; giving up ends it Failed,
 // which gives the snapshot back (titan-ops architecture/resource-lifecycle.md#kinds).
 type Delete struct {
 	cp       *controlplane.Client
@@ -40,9 +38,9 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	isComplete := payload.SnapshotId != "" && payload.VolumeId != "" && payload.ProjectName != ""
+	isComplete := payload.SnapshotId != "" && payload.RequestId != "" && payload.VolumeId != "" && payload.ProjectName != ""
 	if !isComplete {
-		return command.Permanent(fmt.Errorf("volume-snapshot.delete payload lacks snapshotId, volumeId or projectName"))
+		return command.Permanent(fmt.Errorf("volume-snapshot.delete payload lacks snapshotId, requestId, volumeId or projectName"))
 	}
 	parent, name, err := provider.SplitSnapshotId(payload.ExternalSnapshotId)
 	if err != nil {
@@ -62,11 +60,7 @@ func (h *Delete) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if isAlreadyGone {
 		logger.Info("already gone; nothing to delete", "object", provider.SnapshotId(parent, name))
 	}
-	if payload.RequestId != "" {
-		return volume.EndSnapshotRequest(ctx, h.cp, payload.VolumeId, payload.SnapshotId, payload.RequestId, volume.Done("", nil))
-	}
-	report := volume.StatusReport{Report: volume.ReportDeleted}
-	return volume.SendSnapshotStatus(ctx, h.cp, payload.VolumeId, payload.SnapshotId, report)
+	return volume.EndSnapshotRequest(ctx, h.cp, payload.VolumeId, payload.SnapshotId, payload.RequestId, volume.Done("", nil))
 }
 
 func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error, logger *slog.Logger) error {
@@ -74,10 +68,10 @@ func (h *Delete) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	if err := command.DecodePayload(leased, &payload); err != nil {
 		return err
 	}
-	if payload.RequestId != "" {
-		end := volume.Failed("", nil, reasonDeleteFailed, cause)
-		return volume.EndSnapshotRequest(ctx, h.cp, payload.VolumeId, payload.SnapshotId, payload.RequestId, end)
+	if payload.RequestId == "" {
+		logger.Warn("no request id; nothing to end")
+		return nil
 	}
-	report := volume.StatusReport{Report: volume.ReportRequestFailed, Reason: reasonDeleteFailed, Detail: cause.Error()}
-	return volume.SendSnapshotStatus(ctx, h.cp, payload.VolumeId, payload.SnapshotId, report)
+	end := volume.Failed("", nil, reasonDeleteFailed, cause)
+	return volume.EndSnapshotRequest(ctx, h.cp, payload.VolumeId, payload.SnapshotId, payload.RequestId, end)
 }
