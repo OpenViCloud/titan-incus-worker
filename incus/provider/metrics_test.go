@@ -58,7 +58,7 @@ func TestParseMetrics_MalformedLine_IsAnErrorNamingTheLine(t *testing.T) {
 	}
 }
 
-// Oracle: the lab recording of Incus 7.0.1 /1.0/metrics; grep -cv '^#' gives the sample count.
+// Oracle: the lab recording of an Incus 7.0.2 server's /1.0/metrics; grep -cv '^#' gives the sample count.
 func TestParseMetrics_TheLabRecording(t *testing.T) {
 	text, err := os.ReadFile("testdata/lab-metrics-2026-11-10.txt")
 	if err != nil {
