@@ -39,7 +39,7 @@ func leased(kind string, payload map[string]any) command.Leased {
 
 func createLeased(overrides map[string]any) command.Leased {
 	payload := map[string]any{
-		"vmId": vmId, "name": "web-1", "vmOfferingId": "m", "cpuUnits": 1.5, "vcpuCount": 2, "memoryMb": 2048,
+		"vmId": vmId, "name": "web-1", "vcpuCount": 2, "memoryMb": 2048,
 		"templateId": "tpl-abc", "externalNetworkId": "net-1", "projectName": project,
 		"diskSizeGb": 20, "userData": "", "requestId": requestId,
 	}
