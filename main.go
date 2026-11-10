@@ -65,10 +65,11 @@ func main() {
 	loop := command.NewLoop(cp, tenantRoutes, loaded.pollInterval, logger)
 	backupLoop := command.NewLoop(cp, backupRoutes, loaded.pollInterval, logger.With("loop", "backup"))
 	reconciler := reconcile.NewRunner(cp, clusters, reconcilers(), loaded.reconcileInterval, logger)
+	metrics := reconcile.NewRunner(cp, clusters, metricsReconcilers(), loaded.metricsInterval, logger.With("loop", "metrics"))
 	health := healthServer(loaded.healthAddr)
 
 	var running sync.WaitGroup
-	running.Add(3)
+	running.Add(4)
 	go func() {
 		defer running.Done()
 		loop.Run(ctx)
@@ -82,6 +83,10 @@ func main() {
 		reconciler.Run(ctx)
 	}()
 	go func() {
+		defer running.Done()
+		metrics.Run(ctx)
+	}()
+	go func() {
 		err := health.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("health server stopped", "error", err)
@@ -89,7 +94,7 @@ func main() {
 		}
 	}()
 	logger.Info("incus-worker started", "controlPlane", loaded.cpBaseUrl, "pollInterval", loaded.pollInterval,
-		"reconcileInterval", loaded.reconcileInterval)
+		"reconcileInterval", loaded.reconcileInterval, "metricsInterval", loaded.metricsInterval)
 	if missing := loaded.backupTarget.Missing(); len(missing) > 0 {
 		logger.Warn("no backup target: every vm.backup and volume.backup fails until it is set", "missing", missing)
 	}
@@ -159,6 +164,14 @@ func reconcilers() []reconcile.Kind {
 		{Name: "volumes", Reconcile: reconcileVolumes(volume.NewReconciler())},
 		{Name: "vm-snapshots", Reconcile: reconcilerOfTheProvider(vmsnapshot.Reconcile)},
 		{Name: "load-balancers", Reconcile: reconcilerOfTheProvider(loadbalancer.Reconcile)},
+	}
+}
+
+// metricsReconcilers run on a runner of their own: usage is read every minute, while the state reconcilers' two-minute
+// cycle would leave the graphs too coarse (titan-ops features/vm/design.md#vm-metrics).
+func metricsReconcilers() []reconcile.Kind {
+	return []reconcile.Kind{
+		{Name: "vm-metrics", Reconcile: reconcilerOfTheProvider(vm.NewMetrics().Reconcile)},
 	}
 }
 

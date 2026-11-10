@@ -25,6 +25,7 @@ go run .
 | `CP_INTERNAL_TOKEN` | (required) | Sent as `X-Internal-Token` on every `/internal` call |
 | `POLL_INTERVAL` | `2s` | How often an idle worker asks for a command |
 | `RECONCILE_INTERVAL` | `2m` | How often each cluster is read from Incus |
+| `METRICS_INTERVAL` | `60s` | How often each cluster's VM usage (CPU, memory, root filesystem, disk I/O) is read from Incus and sent to the control plane |
 | `IMAGE_SERVER` | `https://images.linuxcontainers.org` | Where templates without their own image URL come from |
 | `HEALTH_ADDR` | `:8080` | `/healthz` listener |
 | `BACKUP_S3_URL`, `BACKUP_S3_BUCKET` | (none) | S3 endpoint and bucket Incus uploads `vm.backup` and `volume.backup` archives to |
@@ -44,7 +45,7 @@ Packages are grouped by role, and imports go one way (`dependency_test.go` fails
 | `bucket/` | Reads the backup bucket: whether a backup's object arrived |
 | `testsupport/` | Test helpers shared by the packages above |
 
-`incus/provider/testdata/` holds what Incus 7.0.1 answered in the lab; the tests replay it.
+`incus/provider/testdata/` holds what Incus answered in the lab (7.0.1; `lab-metrics-2026-11-10.txt` from a 7.0.2 server); the tests replay it.
 
 ## Development
 

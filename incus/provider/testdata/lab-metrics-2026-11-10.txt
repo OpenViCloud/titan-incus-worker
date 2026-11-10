@@ -1,0 +1,356 @@
+# HELP incus_boot_time_seconds The unix epoch at the time of the instance start.
+# TYPE incus_boot_time_seconds counter
+incus_boot_time_seconds{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_boot_time_seconds{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 1.794240992e+09
+# HELP incus_cpu_seconds_total The total number of CPU time used in seconds.
+# TYPE incus_cpu_seconds_total counter
+incus_cpu_seconds_total{cpu="0",mode="iowait",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="0",mode="irq",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="0",mode="idle",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="0",mode="nice",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="0",mode="softirq",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="0",mode="steal",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="0",mode="system",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 53.72
+incus_cpu_seconds_total{cpu="0",mode="user",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="1",mode="iowait",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="1",mode="irq",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="1",mode="idle",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="1",mode="nice",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="1",mode="softirq",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="1",mode="steal",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="1",mode="system",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 48.01
+incus_cpu_seconds_total{cpu="1",mode="user",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="0",mode="iowait",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 9.17
+incus_cpu_seconds_total{cpu="0",mode="irq",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_cpu_seconds_total{cpu="0",mode="idle",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 84283.85
+incus_cpu_seconds_total{cpu="0",mode="nice",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 1.4
+incus_cpu_seconds_total{cpu="0",mode="softirq",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 56.1
+incus_cpu_seconds_total{cpu="0",mode="steal",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 18.24
+incus_cpu_seconds_total{cpu="0",mode="system",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 241.16
+incus_cpu_seconds_total{cpu="0",mode="user",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 170.17
+# HELP incus_cpu_effective_total The total number of effective CPUs.
+# TYPE incus_cpu_effective_total gauge
+incus_cpu_effective_total{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_cpu_effective_total{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+# HELP incus_disk_read_bytes_total The total number of bytes read.
+# TYPE incus_disk_read_bytes_total counter
+incus_disk_read_bytes_total{device="/machine/virt.flash0",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_disk_read_bytes_total{device="/machine/virt.flash1",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_disk_read_bytes_total{device="dev-incus_root",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 1.60879104e+08
+incus_disk_read_bytes_total{device="loop0",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.3036928e+07
+incus_disk_read_bytes_total{device="loop1",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 1.139712e+06
+incus_disk_read_bytes_total{device="loop2",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.78528e+06
+incus_disk_read_bytes_total{device="loop3",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 14336
+incus_disk_read_bytes_total{device="loop4",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_read_bytes_total{device="loop5",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_read_bytes_total{device="loop6",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_read_bytes_total{device="loop7",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_read_bytes_total{device="sda",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 4.4366336e+08
+incus_disk_read_bytes_total{device="sda1",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 4.31550976e+08
+incus_disk_read_bytes_total{device="sda15",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 9.37216e+06
+# HELP incus_disk_reads_completed_total The total number of completed reads.
+# TYPE incus_disk_reads_completed_total counter
+incus_disk_reads_completed_total{device="/machine/virt.flash0",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_disk_reads_completed_total{device="/machine/virt.flash1",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_disk_reads_completed_total{device="dev-incus_root",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 5180
+incus_disk_reads_completed_total{device="loop0",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 656
+incus_disk_reads_completed_total{device="loop1",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 66
+incus_disk_reads_completed_total{device="loop2",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 264
+incus_disk_reads_completed_total{device="loop3",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 11
+incus_disk_reads_completed_total{device="loop4",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_reads_completed_total{device="loop5",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_reads_completed_total{device="loop6",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_reads_completed_total{device="loop7",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_reads_completed_total{device="sda",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 8240
+incus_disk_reads_completed_total{device="sda1",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 7896
+incus_disk_reads_completed_total{device="sda15",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 205
+# HELP incus_disk_written_bytes_total The total number of bytes written.
+# TYPE incus_disk_written_bytes_total counter
+incus_disk_written_bytes_total{device="/machine/virt.flash0",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_disk_written_bytes_total{device="/machine/virt.flash1",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_disk_written_bytes_total{device="dev-incus_root",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 2.774656e+08
+incus_disk_written_bytes_total{device="loop0",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_written_bytes_total{device="loop1",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_written_bytes_total{device="loop2",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_written_bytes_total{device="loop3",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_written_bytes_total{device="loop4",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_written_bytes_total{device="loop5",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_written_bytes_total{device="loop6",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_written_bytes_total{device="loop7",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_written_bytes_total{device="sda",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.86373376e+08
+incus_disk_written_bytes_total{device="sda1",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.8637184e+08
+incus_disk_written_bytes_total{device="sda15",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 1536
+# HELP incus_disk_writes_completed_total The total number of completed writes.
+# TYPE incus_disk_writes_completed_total counter
+incus_disk_writes_completed_total{device="/machine/virt.flash0",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_disk_writes_completed_total{device="/machine/virt.flash1",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_disk_writes_completed_total{device="dev-incus_root",name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 610
+incus_disk_writes_completed_total{device="loop0",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_writes_completed_total{device="loop1",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_writes_completed_total{device="loop2",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_writes_completed_total{device="loop3",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_writes_completed_total{device="loop4",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_writes_completed_total{device="loop5",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_writes_completed_total{device="loop6",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_writes_completed_total{device="loop7",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_disk_writes_completed_total{device="sda",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 10252
+incus_disk_writes_completed_total{device="sda1",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 10249
+incus_disk_writes_completed_total{device="sda15",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 3
+# HELP incus_filesystem_avail_bytes The number of available space in bytes.
+# TYPE incus_filesystem_avail_bytes gauge
+incus_filesystem_avail_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.0463616e+08
+incus_filesystem_avail_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 8.431116288e+09
+incus_filesystem_avail_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/lock",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 5.24288e+06
+incus_filesystem_avail_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/lxd_agent",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 3.3193984e+07
+incus_filesystem_avail_bytes{device="none",fstype="0x-7a7ba70a",mountpoint="/run/credentials/systemd-sysusers.service",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_filesystem_avail_bytes{device="/dev/sda15",fstype="0x4d44",mountpoint="/boot/efi",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 9.5597056e+07
+incus_filesystem_avail_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/snapd/ns",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.0463616e+08
+# HELP incus_filesystem_free_bytes The number of free space in bytes.
+# TYPE incus_filesystem_free_bytes gauge
+incus_filesystem_free_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.0463616e+08
+incus_filesystem_free_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 8.447893504e+09
+incus_filesystem_free_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/lock",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 5.24288e+06
+incus_filesystem_free_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/lxd_agent",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 3.3193984e+07
+incus_filesystem_free_bytes{device="none",fstype="0x-7a7ba70a",mountpoint="/run/credentials/systemd-sysusers.service",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_filesystem_free_bytes{device="/dev/sda15",fstype="0x4d44",mountpoint="/boot/efi",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 9.5597056e+07
+incus_filesystem_free_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/snapd/ns",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.0463616e+08
+# HELP incus_filesystem_size_bytes The size of the filesystem in bytes.
+# TYPE incus_filesystem_size_bytes gauge
+incus_filesystem_size_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.05930496e+08
+incus_filesystem_size_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 1.0222313472e+10
+incus_filesystem_size_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/lock",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 5.24288e+06
+incus_filesystem_size_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/lxd_agent",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 5.24288e+07
+incus_filesystem_size_bytes{device="none",fstype="0x-7a7ba70a",mountpoint="/run/credentials/systemd-sysusers.service",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_filesystem_size_bytes{device="/dev/sda15",fstype="0x4d44",mountpoint="/boot/efi",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 1.02185984e+08
+incus_filesystem_size_bytes{device="tmpfs",fstype="tmpfs",mountpoint="/run/snapd/ns",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.05930496e+08
+# HELP incus_memory_Active_anon_bytes The amount of anonymous memory on active LRU list.
+# TYPE incus_memory_Active_anon_bytes gauge
+incus_memory_Active_anon_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_Active_anon_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 1.253376e+06
+# HELP incus_memory_Active_file_bytes The amount of file-backed memory on active LRU list.
+# TYPE incus_memory_Active_file_bytes gauge
+incus_memory_Active_file_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_Active_file_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 3.44608768e+08
+# HELP incus_memory_Active_bytes The amount of memory on active LRU list.
+# TYPE incus_memory_Active_bytes gauge
+incus_memory_Active_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_Active_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 3.45862144e+08
+# HELP incus_memory_Cached_bytes The amount of cached memory.
+# TYPE incus_memory_Cached_bytes gauge
+incus_memory_Cached_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_Cached_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 5.38619904e+08
+# HELP incus_memory_Dirty_bytes The amount of memory waiting to get written back to the disk.
+# TYPE incus_memory_Dirty_bytes gauge
+incus_memory_Dirty_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_Dirty_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+# HELP incus_memory_HugepagesFree_bytes The amount of free memory for hugetlb.
+# TYPE incus_memory_HugepagesFree_bytes gauge
+incus_memory_HugepagesFree_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_HugepagesFree_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+# HELP incus_memory_HugepagesTotal_bytes The amount of used memory for hugetlb.
+# TYPE incus_memory_HugepagesTotal_bytes gauge
+incus_memory_HugepagesTotal_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_HugepagesTotal_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+# HELP incus_memory_Inactive_anon_bytes The amount of anonymous memory on inactive LRU list.
+# TYPE incus_memory_Inactive_anon_bytes gauge
+incus_memory_Inactive_anon_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_Inactive_anon_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 7.4477568e+07
+# HELP incus_memory_Inactive_file_bytes The amount of file-backed memory on inactive LRU list.
+# TYPE incus_memory_Inactive_file_bytes gauge
+incus_memory_Inactive_file_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_Inactive_file_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 1.9623936e+08
+# HELP incus_memory_Inactive_bytes The amount of memory on inactive LRU list.
+# TYPE incus_memory_Inactive_bytes gauge
+incus_memory_Inactive_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_Inactive_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.70716928e+08
+# HELP incus_memory_Mapped_bytes The amount of mapped memory.
+# TYPE incus_memory_Mapped_bytes gauge
+incus_memory_Mapped_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_Mapped_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 8.1989632e+07
+# HELP incus_memory_MemAvailable_bytes The amount of available memory.
+# TYPE incus_memory_MemAvailable_bytes gauge
+incus_memory_MemAvailable_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 4.88549824e+08
+incus_memory_MemAvailable_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 1.780793344e+09
+# HELP incus_memory_MemFree_bytes The amount of free memory.
+# TYPE incus_memory_MemFree_bytes gauge
+incus_memory_MemFree_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 4.88549824e+08
+incus_memory_MemFree_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 1.28509952e+09
+# HELP incus_memory_MemTotal_bytes The amount of used memory.
+# TYPE incus_memory_MemTotal_bytes gauge
+incus_memory_MemTotal_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 1.073741824e+09
+incus_memory_MemTotal_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.05928448e+09
+# HELP incus_memory_RSS_bytes The amount of anonymous and swap cache memory.
+# TYPE incus_memory_RSS_bytes gauge
+incus_memory_RSS_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_RSS_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+# HELP incus_memory_Shmem_bytes The amount of cached filesystem data that is swap-backed.
+# TYPE incus_memory_Shmem_bytes gauge
+incus_memory_Shmem_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_Shmem_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.4625152e+07
+# HELP incus_memory_Swap_bytes The amount of used swap memory.
+# TYPE incus_memory_Swap_bytes gauge
+incus_memory_Swap_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_Swap_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+# HELP incus_memory_Unevictable_bytes The amount of unevictable memory.
+# TYPE incus_memory_Unevictable_bytes gauge
+incus_memory_Unevictable_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_Unevictable_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 3.1113216e+07
+# HELP incus_memory_Writeback_bytes The amount of memory queued for syncing to disk.
+# TYPE incus_memory_Writeback_bytes gauge
+incus_memory_Writeback_bytes{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_Writeback_bytes{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+# HELP incus_memory_OOM_kills_total The number of out of memory kills.
+# TYPE incus_memory_OOM_kills_total counter
+incus_memory_OOM_kills_total{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_memory_OOM_kills_total{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+# HELP incus_network_receive_bytes_total The amount of received bytes on a given interface.
+# TYPE incus_network_receive_bytes_total counter
+incus_network_receive_bytes_total{device="enp5s0",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 2.4006611e+07
+incus_network_receive_bytes_total{device="lo",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 3.3690136e+07
+# HELP incus_network_receive_drop_total The amount of received dropped bytes on a given interface.
+# TYPE incus_network_receive_drop_total counter
+incus_network_receive_drop_total{device="enp5s0",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_network_receive_drop_total{device="lo",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+# HELP incus_network_receive_errs_total The amount of received errors on a given interface.
+# TYPE incus_network_receive_errs_total counter
+incus_network_receive_errs_total{device="enp5s0",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_network_receive_errs_total{device="lo",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+# HELP incus_network_receive_packets_total The amount of received packets on a given interface.
+# TYPE incus_network_receive_packets_total counter
+incus_network_receive_packets_total{device="enp5s0",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 229517
+incus_network_receive_packets_total{device="lo",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 455560
+# HELP incus_network_transmit_bytes_total The amount of transmitted bytes on a given interface.
+# TYPE incus_network_transmit_bytes_total counter
+incus_network_transmit_bytes_total{device="enp5s0",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 1.7633116e+07
+incus_network_transmit_bytes_total{device="lo",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 3.3690136e+07
+# HELP incus_network_transmit_drop_total The amount of transmitted dropped bytes on a given interface.
+# TYPE incus_network_transmit_drop_total counter
+incus_network_transmit_drop_total{device="enp5s0",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_network_transmit_drop_total{device="lo",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+# HELP incus_network_transmit_errs_total The amount of transmitted errors on a given interface.
+# TYPE incus_network_transmit_errs_total counter
+incus_network_transmit_errs_total{device="enp5s0",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+incus_network_transmit_errs_total{device="lo",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 0
+# HELP incus_network_transmit_packets_total The amount of transmitted packets on a given interface.
+# TYPE incus_network_transmit_packets_total counter
+incus_network_transmit_packets_total{device="enp5s0",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 229555
+incus_network_transmit_packets_total{device="lo",name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 455560
+# HELP incus_procs_total The number of running processes.
+# TYPE incus_procs_total gauge
+incus_procs_total{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_procs_total{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 104
+# HELP incus_time_seconds The current unix epoch.
+# TYPE incus_time_seconds counter
+incus_time_seconds{name="vmlabmetricsnoagent222222222",project="lab-mp",type="virtual-machine"} 0
+incus_time_seconds{name="vm7atdlelbvjafpojgfreep4u23i",project="t-b8e09a95a24349d6b6e00ac318458e1f",type="virtual-machine"} 1.794325812e+09
+# HELP incus_operations_total The number of running operations
+# TYPE incus_operations_total counter
+incus_operations_total 0
+# HELP incus_warnings_total The number of active warnings.
+# TYPE incus_warnings_total counter
+incus_warnings_total 0
+# HELP incus_uptime_seconds The daemon uptime in seconds.
+# TYPE incus_uptime_seconds counter
+incus_uptime_seconds 84842.957873688
+# HELP incus_project_resources_total Current resource count in a project.
+# TYPE incus_project_resources_total gauge
+incus_project_resources_total{project="default",resource="containers"} 0
+incus_project_resources_total{project="default",resource="virtual-machines"} 0
+incus_project_resources_total{project="default",resource="images"} 1
+incus_project_resources_total{project="default",resource="profiles"} 1
+incus_project_resources_total{project="default",resource="networks"} 2
+incus_project_resources_total{project="default",resource="storage-volumes"} 0
+incus_project_resources_total{project="lab-mp",resource="containers"} 0
+incus_project_resources_total{project="lab-mp",resource="virtual-machines"} 1
+incus_project_resources_total{project="lab-mp",resource="images"} 0
+incus_project_resources_total{project="lab-mp",resource="profiles"} 0
+incus_project_resources_total{project="lab-mp",resource="networks"} 0
+incus_project_resources_total{project="lab-mp",resource="storage-volumes"} 0
+incus_project_resources_total{project="t-0ca58d4b7bbb4eb58ff323ddc4946433",resource="containers"} 0
+incus_project_resources_total{project="t-0ca58d4b7bbb4eb58ff323ddc4946433",resource="virtual-machines"} 0
+incus_project_resources_total{project="t-0ca58d4b7bbb4eb58ff323ddc4946433",resource="images"} 0
+incus_project_resources_total{project="t-0ca58d4b7bbb4eb58ff323ddc4946433",resource="profiles"} 1
+incus_project_resources_total{project="t-0ca58d4b7bbb4eb58ff323ddc4946433",resource="networks"} 0
+incus_project_resources_total{project="t-0ca58d4b7bbb4eb58ff323ddc4946433",resource="storage-volumes"} 0
+incus_project_resources_total{project="t-b8e09a95a24349d6b6e00ac318458e1f",resource="containers"} 0
+incus_project_resources_total{project="t-b8e09a95a24349d6b6e00ac318458e1f",resource="virtual-machines"} 1
+incus_project_resources_total{project="t-b8e09a95a24349d6b6e00ac318458e1f",resource="images"} 0
+incus_project_resources_total{project="t-b8e09a95a24349d6b6e00ac318458e1f",resource="profiles"} 1
+incus_project_resources_total{project="t-b8e09a95a24349d6b6e00ac318458e1f",resource="networks"} 1
+incus_project_resources_total{project="t-b8e09a95a24349d6b6e00ac318458e1f",resource="storage-volumes"} 0
+# HELP incus_storage_pool_used_bytes The used space in bytes on a storage pool.
+# TYPE incus_storage_pool_used_bytes gauge
+incus_storage_pool_used_bytes{driver="lvm",pool="default"} 2.550264758e+09
+# HELP incus_storage_pool_size_bytes The total space in bytes on a storage pool.
+# TYPE incus_storage_pool_size_bytes gauge
+incus_storage_pool_size_bytes{driver="lvm",pool="default"} 4.2861592576e+10
+# HELP incus_go_goroutines Number of goroutines that currently exist.
+# TYPE incus_go_goroutines gauge
+incus_go_goroutines 59
+# HELP incus_go_alloc_bytes Number of bytes allocated and still in use.
+# TYPE incus_go_alloc_bytes gauge
+incus_go_alloc_bytes 1.6560464e+07
+# HELP incus_go_alloc_bytes_total Total number of bytes allocated, even if freed.
+# TYPE incus_go_alloc_bytes_total counter
+incus_go_alloc_bytes_total 2.599359136e+09
+# HELP incus_go_sys_bytes Number of bytes obtained from system.
+# TYPE incus_go_sys_bytes gauge
+incus_go_sys_bytes 1.38052047e+08
+# HELP incus_go_lookups_total Total number of pointer lookups.
+# TYPE incus_go_lookups_total counter
+incus_go_lookups_total 0
+# HELP incus_go_mallocs_total Total number of mallocs.
+# TYPE incus_go_mallocs_total counter
+incus_go_mallocs_total 2.1993828e+07
+# HELP incus_go_frees_total Total number of frees.
+# TYPE incus_go_frees_total counter
+incus_go_frees_total 2.1890179e+07
+# HELP incus_go_heap_alloc_bytes Number of heap bytes allocated and still in use.
+# TYPE incus_go_heap_alloc_bytes gauge
+incus_go_heap_alloc_bytes 1.6560464e+07
+# HELP incus_go_heap_sys_bytes Number of heap bytes obtained from system.
+# TYPE incus_go_heap_sys_bytes gauge
+incus_go_heap_sys_bytes 1.27860736e+08
+# HELP incus_go_heap_idle_bytes Number of heap bytes waiting to be used.
+# TYPE incus_go_heap_idle_bytes gauge
+incus_go_heap_idle_bytes 1.06921984e+08
+# HELP incus_go_heap_inuse_bytes Number of heap bytes that are in use.
+# TYPE incus_go_heap_inuse_bytes gauge
+incus_go_heap_inuse_bytes 2.0938752e+07
+# HELP incus_go_heap_released_bytes Number of heap bytes released to OS.
+# TYPE incus_go_heap_released_bytes gauge
+incus_go_heap_released_bytes 1.02531072e+08
+# HELP incus_go_heap_objects Number of allocated objects.
+# TYPE incus_go_heap_objects gauge
+incus_go_heap_objects 103649
+# HELP incus_go_stack_inuse_bytes Number of bytes in use by the stack allocator.
+# TYPE incus_go_stack_inuse_bytes gauge
+incus_go_stack_inuse_bytes 2.162688e+06
+# HELP incus_go_stack_sys_bytes Number of bytes obtained from system for stack allocator.
+# TYPE incus_go_stack_sys_bytes gauge
+incus_go_stack_sys_bytes 2.162688e+06
+# HELP incus_go_mspan_inuse_bytes Number of bytes in use by mspan structures.
+# TYPE incus_go_mspan_inuse_bytes gauge
+incus_go_mspan_inuse_bytes 289440
+# HELP incus_go_mspan_sys_bytes Number of bytes used for mspan structures obtained from system.
+# TYPE incus_go_mspan_sys_bytes gauge
+incus_go_mspan_sys_bytes 505920
+# HELP incus_go_mcache_inuse_bytes Number of bytes in use by mcache structures.
+# TYPE incus_go_mcache_inuse_bytes gauge
+incus_go_mcache_inuse_bytes 9184
+# HELP incus_go_mcache_sys_bytes Number of bytes used for mcache structures obtained from system.
+# TYPE incus_go_mcache_sys_bytes gauge
+incus_go_mcache_sys_bytes 16072
+# HELP incus_go_buck_hash_sys_bytes Number of bytes used by the profiling bucket hash table.
+# TYPE incus_go_buck_hash_sys_bytes gauge
+incus_go_buck_hash_sys_bytes 1.990752e+06
+# HELP incus_go_gc_sys_bytes Number of bytes used for garbage collection system metadata.
+# TYPE incus_go_gc_sys_bytes gauge
+incus_go_gc_sys_bytes 4.579088e+06
+# HELP incus_go_other_sys_bytes Number of bytes used for other system allocations.
+# TYPE incus_go_other_sys_bytes gauge
+incus_go_other_sys_bytes 936791
+# HELP incus_go_next_gc_bytes Number of heap bytes when next garbage collection will take place.
+# TYPE incus_go_next_gc_bytes gauge
+incus_go_next_gc_bytes 2.4651346e+07
+# EOF

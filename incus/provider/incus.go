@@ -281,6 +281,15 @@ func (p *Incus) GetServerArchitectures(ctx context.Context) ([]string, error) {
 	return server.Environment.Architectures, nil
 }
 
+// GetMetrics reads on the connection without a project: Incus then answers every project's instances.
+func (p *Incus) GetMetrics(ctx context.Context) (string, error) {
+	metrics, err := p.server.GetMetrics()
+	if err != nil {
+		return "", fmt.Errorf("get metrics: %w", err)
+	}
+	return metrics, nil
+}
+
 func (p *Incus) PatchInstance(ctx context.Context, project string, name string, instance api.InstancePut) error {
 	if err := p.send(ctx, "PATCH", project, "/instances/"+url.PathEscape(name), instance); err != nil {
 		return fmt.Errorf("patch instance %s in project %s: %w", name, project, err)
