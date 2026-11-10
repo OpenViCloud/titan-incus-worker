@@ -24,18 +24,17 @@ const (
 
 // createPayload mirrors ProviderCommandQueue.EnqueueVmCreateAsync. templateId is already the cluster's image alias.
 type createPayload struct {
-	VmId              string  `json:"vmId"`
-	RequestId         string  `json:"requestId"`
-	Name              string  `json:"name"`
-	CpuUnits          float64 `json:"cpuUnits"`
-	VcpuCount         int     `json:"vcpuCount"`
-	MemoryMb          int     `json:"memoryMb"`
-	TemplateId        string  `json:"templateId"`
-	ExternalNetworkId string  `json:"externalNetworkId"`
-	ProjectName       string  `json:"projectName"`
-	DiskSizeGb        int     `json:"diskSizeGb"`
-	UserData          string  `json:"userData"`
-	VendorData        string  `json:"vendorData"`
+	VmId              string `json:"vmId"`
+	RequestId         string `json:"requestId"`
+	Name              string `json:"name"`
+	VcpuCount         int    `json:"vcpuCount"`
+	MemoryMb          int    `json:"memoryMb"`
+	TemplateId        string `json:"templateId"`
+	ExternalNetworkId string `json:"externalNetworkId"`
+	ProjectName       string `json:"projectName"`
+	DiskSizeGb        int    `json:"diskSizeGb"`
+	UserData          string `json:"userData"`
+	VendorData        string `json:"vendorData"`
 }
 
 // Create runs vm.create and ends the request it names: Done with the instance name and what it read of the instance,
