@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,5 +69,23 @@ func TestTransportError_DoesNotSayPermanent(t *testing.T) {
 	_, saysPermanent := transportErr.(interface{ Permanent() bool })
 	if saysPermanent {
 		t.Error("a transport error must stay retryable, so it must not answer Permanent")
+	}
+}
+
+func TestClient_Post_SendsTheJsonBody(t *testing.T) {
+	var method, contentType, body string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		contentType = r.Header.Get("Content-Type")
+		read, _ := io.ReadAll(r.Body)
+		body = string(read)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	err := NewWithHTTPClient(server.URL, "t", server.Client()).Post(context.Background(), "/internal/x", map[string]int{"a": 1})
+
+	if err != nil || method != http.MethodPost || contentType != "application/json" || body != `{"a":1}` {
+		t.Fatalf("err %v, %s %s %s", err, method, contentType, body)
 	}
 }

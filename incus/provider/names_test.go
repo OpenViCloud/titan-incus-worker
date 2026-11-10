@@ -101,3 +101,31 @@ func TestSnapshotId_RoundTrips_AndRefusesAnythingElse(t *testing.T) {
 		}
 	}
 }
+
+func TestIsInstanceName_IsVmAndTwentySixBase32Characters(t *testing.T) {
+	ours, err := InstanceName(someId)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The lab's VM was named by hand: its last character could not end a 16-byte encoding, yet the shape is Titan's
+	// (titan-ops features/vm/design.md#vm-metrics), and the metrics reader takes it.
+	for _, name := range []string{ours, "vm7atdlelbvjafpojgfreep4u23i", "vmlabmetricsnoagent222222222"} {
+		if !IsInstanceName(name) {
+			t.Errorf("%s: not taken as a Titan instance name", name)
+		}
+	}
+	volume, _ := VolumeName(someId)
+	backupCopy, _ := BackupInstanceCopyName(someId)
+	for _, name := range []string{
+		"", "vm", "lab-vm", volume, backupCopy,
+		"vm7atdlelbvjafpojgfreep4u23",   // 25 characters
+		"vm7atdlelbvjafpojgfreep4u23ii", // 27 characters
+		"vm7atdlelbvjafpojgfreep4u231",  // 1 is not base32
+		"vm7ATDLELBVJAFPOJGFREEP4U23I",  // upper case
+		"xvm7atdlelbvjafpojgfreep4u23i",
+	} {
+		if IsInstanceName(name) {
+			t.Errorf("%q: taken as a Titan instance name", name)
+		}
+	}
+}

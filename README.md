@@ -25,6 +25,7 @@ go run .
 | `CP_INTERNAL_TOKEN` | (required) | Sent as `X-Internal-Token` on every `/internal` call |
 | `POLL_INTERVAL` | `2s` | How often an idle worker asks for a command |
 | `RECONCILE_INTERVAL` | `2m` | How often each cluster is read from Incus |
+| `METRICS_INTERVAL` | `60s` | How often each cluster's VM usage (CPU, memory, root filesystem, disk I/O) is read from Incus and sent to the control plane |
 | `IMAGE_SERVER` | `https://images.linuxcontainers.org` | Where templates without their own image URL come from |
 | `HEALTH_ADDR` | `:8080` | `/healthz` listener |
 | `BACKUP_S3_URL`, `BACKUP_S3_BUCKET` | (none) | S3 endpoint and bucket Incus uploads `vm.backup` and `volume.backup` archives to |

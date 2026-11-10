@@ -129,6 +129,9 @@ type Provider struct {
 	InstanceBackups []InstanceBackup
 	VolumeBackups   []VolumeBackup
 	BackupErr       error
+	// Metrics is the OpenMetrics text GetMetrics answers, unless GetMetricsErr is set.
+	Metrics       string
+	GetMetricsErr error
 }
 
 type InstanceBackup struct {
@@ -532,6 +535,14 @@ func (p *Provider) ListImages(ctx context.Context) ([]api.Image, error) {
 func (p *Provider) GetServerArchitectures(ctx context.Context) ([]string, error) {
 	p.count()
 	return p.ServerArchitectures, p.GetServerArchitecturesErr
+}
+
+func (p *Provider) GetMetrics(ctx context.Context) (string, error) {
+	p.count()
+	if p.GetMetricsErr != nil {
+		return "", p.GetMetricsErr
+	}
+	return p.Metrics, nil
 }
 
 func (p *Provider) DeleteImage(ctx context.Context, fingerprint string) error {

@@ -14,6 +14,7 @@ type config struct {
 	cpInternalToken   string
 	pollInterval      time.Duration
 	reconcileInterval time.Duration
+	metricsInterval   time.Duration
 	imageServer       string
 	healthAddr        string
 	backupTarget      backup.Target
@@ -44,6 +45,10 @@ func loadConfig(lookup func(string) string) (config, error) {
 		return config{}, err
 	}
 	loaded.reconcileInterval, err = durationOr(lookup, "RECONCILE_INTERVAL", 2*time.Minute)
+	if err != nil {
+		return config{}, err
+	}
+	loaded.metricsInterval, err = durationOr(lookup, "METRICS_INTERVAL", time.Minute)
 	if err != nil {
 		return config{}, err
 	}

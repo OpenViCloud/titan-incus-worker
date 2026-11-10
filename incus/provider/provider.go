@@ -86,6 +86,9 @@ type Provider interface {
 
 	// The architectures this cluster runs (environment.architectures of /1.0), e.g. aarch64 on an arm64 host.
 	GetServerArchitectures(ctx context.Context) ([]string, error)
+
+	// GetMetrics answers /1.0/metrics of every project as OpenMetrics text; ParseMetrics reads it.
+	GetMetrics(ctx context.Context) (string, error)
 }
 
 // OperationFailedError: the Incus operation finished with Failure (or Cancelled). Message is the operation's err.

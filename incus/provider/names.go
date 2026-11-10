@@ -27,6 +27,24 @@ func InstanceName(vmId string) (string, error) {
 	return objectName(instancePrefix, vmId)
 }
 
+// instanceNameLength is "vm" and the 26 characters of objectName.
+const instanceNameLength = len(instancePrefix) + 26
+
+// IsInstanceName says whether an Incus instance has the shape InstanceName gives: "vm" and 26 characters of a-z, 2-7.
+// The shape, not a decode: an instance named by hand in Titan's shape counts too.
+func IsInstanceName(name string) bool {
+	if len(name) != instanceNameLength || !strings.HasPrefix(name, instancePrefix) {
+		return false
+	}
+	for _, character := range name[len(instancePrefix):] {
+		isBase32 := (character >= 'a' && character <= 'z') || (character >= '2' && character <= '7')
+		if !isBase32 {
+			return false
+		}
+	}
+	return true
+}
+
 func VolumeName(volumeId string) (string, error) {
 	return objectName(volumePrefix, volumeId)
 }

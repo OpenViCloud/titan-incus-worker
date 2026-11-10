@@ -60,7 +60,7 @@ func NewWithHTTPClient(baseUrl string, token string, httpClient *http.Client) *C
 	return &Client{baseUrl: strings.TrimRight(baseUrl, "/"), token: token, http: httpClient}
 }
 
-// Put, Patch: payload nil sends no body.
+// Put, Patch, Post: payload nil sends no body.
 func (c *Client) Put(ctx context.Context, path string, payload any) error {
 	_, err := c.send(ctx, http.MethodPut, path, payload)
 	return err
@@ -68,6 +68,11 @@ func (c *Client) Put(ctx context.Context, path string, payload any) error {
 
 func (c *Client) Patch(ctx context.Context, path string, payload any) error {
 	_, err := c.send(ctx, http.MethodPatch, path, payload)
+	return err
+}
+
+func (c *Client) Post(ctx context.Context, path string, payload any) error {
+	_, err := c.send(ctx, http.MethodPost, path, payload)
 	return err
 }
 

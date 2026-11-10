@@ -35,17 +35,27 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.pollInterval != 2*time.Second || loaded.reconcileInterval != 2*time.Minute ||
+	if loaded.pollInterval != 2*time.Second || loaded.reconcileInterval != 2*time.Minute || loaded.metricsInterval != time.Minute ||
 		loaded.imageServer != "https://images.linuxcontainers.org" || loaded.healthAddr != ":8080" {
 		t.Fatalf("defaults: %+v", loaded)
 	}
 }
 
 func TestLoadConfig_BadDuration_Fails(t *testing.T) {
-	_, err := loadConfig(lookupFrom(map[string]string{"CP_BASE_URL": "http://cp", "CP_INTERNAL_TOKEN": "t", "POLL_INTERVAL": "soon"}))
+	for _, key := range []string{"POLL_INTERVAL", "RECONCILE_INTERVAL", "METRICS_INTERVAL"} {
+		_, err := loadConfig(lookupFrom(map[string]string{"CP_BASE_URL": "http://cp", "CP_INTERNAL_TOKEN": "t", key: "soon"}))
 
-	if err == nil {
-		t.Fatal("accepted POLL_INTERVAL=soon")
+		if err == nil {
+			t.Errorf("accepted %s=soon", key)
+		}
+	}
+}
+
+func TestLoadConfig_ReadsTheMetricsInterval(t *testing.T) {
+	loaded, err := loadConfig(lookupFrom(map[string]string{"CP_BASE_URL": "http://cp", "CP_INTERNAL_TOKEN": "t", "METRICS_INTERVAL": "30s"}))
+
+	if err != nil || loaded.metricsInterval != 30*time.Second {
+		t.Fatalf("err %v, metrics interval %s", err, loaded.metricsInterval)
 	}
 }
 
