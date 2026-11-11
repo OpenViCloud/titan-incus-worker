@@ -249,7 +249,7 @@ func TestMetrics_LogsTheCount_NotThePayload(t *testing.T) {
 	}
 }
 
-// The batch is stamped in UTC at the second, the shape the contract shows, whatever the host's zone.
+// The batch is stamped in UTC at the second, the shape the contract shows, whatever the host's time zone.
 func TestMetrics_SampledAt_IsUtcAtTheSecond(t *testing.T) {
 	hanoi := time.FixedZone("ICT", 7*60*60)
 	readAt := time.Date(2026, 11, 10, 21, 0, 0, 999_999_999, hanoi)
