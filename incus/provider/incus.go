@@ -36,11 +36,16 @@ func (p *Incus) CreateProject(ctx context.Context, project api.ProjectsPost) err
 }
 
 func (p *Incus) GetInstance(ctx context.Context, project string, name string) (*api.Instance, error) {
-	instance, _, err := p.server.UseProject(project).GetInstance(name)
+	instance, _, err := p.GetInstanceWithEtag(ctx, project, name)
+	return instance, err
+}
+
+func (p *Incus) GetInstanceWithEtag(ctx context.Context, project string, name string) (*api.Instance, string, error) {
+	instance, etag, err := p.server.UseProject(project).GetInstance(name)
 	if err != nil {
-		return nil, fmt.Errorf("get instance %s in project %s: %w", name, project, err)
+		return nil, "", fmt.Errorf("get instance %s in project %s: %w", name, project, err)
 	}
-	return instance, nil
+	return instance, etag, nil
 }
 
 func (p *Incus) GetInstanceFull(ctx context.Context, project string, name string) (*api.InstanceFull, error) {
@@ -297,8 +302,8 @@ func (p *Incus) PatchInstance(ctx context.Context, project string, name string, 
 	return nil
 }
 
-func (p *Incus) UpdateInstance(ctx context.Context, project string, name string, instance api.InstancePut) error {
-	operation, err := p.server.UseProject(project).UpdateInstance(name, instance, "")
+func (p *Incus) UpdateInstance(ctx context.Context, project string, name string, instance api.InstancePut, etag string) error {
+	operation, err := p.server.UseProject(project).UpdateInstance(name, instance, etag)
 	if err != nil {
 		return fmt.Errorf("update instance %s in project %s: %w", name, project, err)
 	}

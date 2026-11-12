@@ -233,6 +233,52 @@ func TestDetach_RemovesOnlyThisVolumesDisk_FromTheInstanceUsingIt_AndEndsTheRequ
 	}
 }
 
+// Another run wrote the instance between this run's read and its write (a lease that ran out while its run was still
+// going, titan-ops features/provider/design.md#tenant-lane): Incus refuses the stale ETag, so nothing is overwritten,
+// the run fails retryable, and the next run reads the instance again and keeps the disk attached meanwhile.
+func TestDetach_InstanceWrittenSinceTheRead_IsNotOverwritten_AndTheNextRunKeepsTheDiskAttachedMeanwhile(t *testing.T) {
+	cp := testsupport.NewControlPlane(t)
+	p := testsupport.NewProvider()
+	p.Volumes[project+"/"+volumeName] = usedVolume(usedByInstance)
+	p.Instances[project+"/"+instance] = &api.Instance{Name: instance, InstancePut: api.InstancePut{Devices: map[string]map[string]string{
+		"root":     {"type": "disk", "pool": "default", "path": "/"},
+		volumeName: {"type": "disk", "pool": "default", "source": volumeName},
+	}}}
+	attachedMeanwhile := false
+	p.AfterGetInstance = func() {
+		if attachedMeanwhile {
+			return
+		}
+		attachedMeanwhile = true
+		p.WriteInstance(project, instance, func(devices map[string]map[string]string) {
+			devices["volnew"] = map[string]string{"type": "disk", "pool": "default", "source": "volnew"}
+		})
+	}
+	detach := NewDetach(cp.Client(), clusters(p, ""))
+
+	first := detach.Run(context.Background(), attachLeased("volume.detach"), testsupport.DiscardLogger())
+
+	if first == nil || !command.IsRetryable(first) || len(p.UpdatedInstances) != 0 {
+		t.Fatalf("want a retryable error and no write, got err %v, PUTs %+v", first, p.UpdatedInstances)
+	}
+	if len(cp.RequestsTo("PATCH ")) != 0 {
+		t.Fatalf("the request ended on a run that wrote nothing: %+v", cp.Requests())
+	}
+
+	p.AfterUpdateInstance = func() { p.Volumes[project+"/"+volumeName] = usedVolume() }
+	second := detach.Run(context.Background(), attachLeased("volume.detach"), testsupport.DiscardLogger())
+
+	if second != nil || len(p.UpdatedInstances) != 1 {
+		t.Fatalf("err %v, PUTs %+v", second, p.UpdatedInstances)
+	}
+	devices := p.UpdatedInstances[0].Devices
+	_, stillThere := devices[volumeName]
+	_, newKept := devices["volnew"]
+	if stillThere || !newKept {
+		t.Fatalf("devices after detach: %v", devices)
+	}
+}
+
 // A repeat after the device is gone (lab-storage 04b) changes nothing and reports the same.
 func TestDetach_VolumeUsedByNoInstance_EndsTheRequestDoneWithoutAPut(t *testing.T) {
 	cp := testsupport.NewControlPlane(t)
