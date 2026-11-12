@@ -25,7 +25,7 @@ go run .
 | `CP_INTERNAL_TOKEN` | (required) | Sent as `X-Internal-Token` on every `/internal` call |
 | `WORKER_ROLE` | `all` | Which loops this process runs: `commands` (customer commands and backups), `inventory` (reading every cluster: state and VM usage), or `all` of them. Command processes can run side by side; run one process of role `inventory` or `all`, or each cluster is read and reported once per such process |
 | `COMMAND_SLOTS` | `4` | How many customer commands one process runs at once; backups run one at a time on a loop of their own. Which commands may run side by side is the control plane's lease rule |
-| `POLL_INTERVAL` | `2s` | How often each idle command slot asks for a command |
+| `POLL_INTERVAL` | `2s` | How often each idle command slot, and the backup loop, asks for a command |
 | `RECONCILE_INTERVAL` | `2m` | How often each cluster is read from Incus |
 | `METRICS_INTERVAL` | `60s` | How often each cluster's VM usage (CPU, memory, root filesystem, disk I/O) is read from Incus and sent to the control plane |
 | `IMAGE_SERVER` | `https://images.linuxcontainers.org` | Where templates without their own image URL come from |
