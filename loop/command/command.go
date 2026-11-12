@@ -1,4 +1,4 @@
-// Package command leases provider commands from the control plane, runs them one at a time, and reports the outcome
+// Package command leases provider commands from the control plane, runs each under its lease, and reports the outcome
 // (titan-ops architecture/provider-and-worker.md#provider-command-lease).
 package command
 
@@ -22,7 +22,8 @@ type Leased struct {
 	LeaseUntil  string          `json:"leaseUntil"` // unread; kept as text so a format change cannot break leasing
 }
 
-// Handler runs one kind. Run must be safe to repeat from the start: a lease that ran out lets a second run overlap.
+// Handler runs one kind. Run must be safe to repeat from the start: a lease that ran out lets a second run overlap. One
+// handler serves every slot of a Pool, so Run is called concurrently, for different commands.
 type Handler interface {
 	// Run does the provider work and sends the success callback.
 	Run(ctx context.Context, leased Leased, logger *slog.Logger) error

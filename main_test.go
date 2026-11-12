@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/OpenViCloud/titan-incus-worker/incus/cluster"
@@ -55,6 +56,33 @@ func TestMetricsReconcilers_ReadEachReachableClusterOnce_AndNothingElse(t *testi
 	for _, kind := range reconcilers() {
 		if kind.Name == "vm-metrics" {
 			t.Error("vm-metrics also runs on the state reconciler's interval")
+		}
+	}
+}
+
+type namedRunner string
+
+func (namedRunner) Run(context.Context) {}
+
+// The command pod leases (customer commands and backups) and reports nothing of its own; the inventory pod only
+// reconciles and reads metrics, so each cluster is read once per cycle however many command pods run
+// (titan-ops architecture/provider-and-worker.md#go-worker).
+func TestLoopsOf_EachRole_RunsItsLoopsOnly(t *testing.T) {
+	all := loops{commands: namedRunner("commands"), backups: namedRunner("backups"),
+		reconciler: namedRunner("reconciler"), metrics: namedRunner("metrics")}
+	want := map[role]string{
+		roleAll:       "commands,backups,reconciler,metrics",
+		roleCommands:  "commands,backups",
+		roleInventory: "reconciler,metrics",
+	}
+
+	for role, names := range want {
+		got := []string{}
+		for _, running := range all.of(role) {
+			got = append(got, string(running.(namedRunner)))
+		}
+		if strings.Join(got, ",") != names {
+			t.Errorf("%s runs %v, want %s", role, got, names)
 		}
 	}
 }

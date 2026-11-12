@@ -23,6 +23,8 @@ go run .
 |---|---|---|
 | `CP_BASE_URL` | (required) | Control plane base URL |
 | `CP_INTERNAL_TOKEN` | (required) | Sent as `X-Internal-Token` on every `/internal` call |
+| `WORKER_ROLE` | `all` | Which loops this process runs: `commands` (customer commands and backups), `inventory` (reading every cluster: state and VM usage), or `all` of them. Command processes can run side by side; run one inventory process, or each cluster is read and reported once per process |
+| `COMMAND_SLOTS` | `4` | How many customer commands one process runs at once; backups run one at a time on a loop of their own. Which commands may run side by side is the control plane's lease rule |
 | `POLL_INTERVAL` | `2s` | How often an idle worker asks for a command |
 | `RECONCILE_INTERVAL` | `2m` | How often each cluster is read from Incus |
 | `METRICS_INTERVAL` | `60s` | How often each cluster's VM usage (CPU, memory, root filesystem, disk I/O) is read from Incus and sent to the control plane |
@@ -37,7 +39,7 @@ Packages are grouped by role, and imports go one way (`dependency_test.go` fails
 
 | Package | Role |
 |---|---|
-| `main.go` | The one place that knows every package: routes each command kind and starts the reconcilers; backups run on a command loop of their own, so a long upload never holds a tenant's command |
+| `main.go` | The one place that knows every package: routes each command kind and starts the loops of its `WORKER_ROLE`; backups run on a command loop of their own, so a long upload never holds a tenant's command |
 | `loop/command`, `loop/reconcile` | Lease, retry and log each command · the reconcile cycle per cluster and kind; know no resource |
 | `resource/<kind>/` | One resource each: a file per verb, its report and, for most, its reconciler · `resource/backup/` is the one exception: it backs up two resources (`vm.go`, `volume.go`), has no callback, so no report, and no reconciler |
 | `incus/provider`, `incus/cluster` | The Incus port and every name Titan gives things on Incus · cluster id → connection |
