@@ -32,9 +32,8 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/resource/volume"
 )
 
-// The longest one run of a kind may take. An operation that never ends must not hold the worker,
-// which runs one command at a time; past the limit the run fails and is retried. A pull that runs long blocks every
-// other command meanwhile.
+// The longest one run of a kind may take. An operation that never ends must not hold its command slot for ever; past
+// the limit the run fails and is retried.
 const (
 	vmCommandTimeout      = 15 * time.Minute
 	networkCommandTimeout = 5 * time.Minute
@@ -62,30 +61,18 @@ func main() {
 	cp := controlplane.New(loaded.cpBaseUrl, loaded.cpInternalToken)
 	clusters := cluster.NewResolver(cp, cluster.ConnectIncus, logger)
 	tenantRoutes, backupRoutes := splitBackupRoutes(routes(cp, clusters, loaded.imageServer, loaded.backupTarget))
-	loop := command.NewLoop(cp, tenantRoutes, loaded.pollInterval, logger)
-	backupLoop := command.NewLoop(cp, backupRoutes, loaded.pollInterval, logger.With("loop", "backup"))
-	reconciler := reconcile.NewRunner(cp, clusters, reconcilers(), loaded.reconcileInterval, logger)
-	metrics := reconcile.NewRunner(cp, clusters, metricsReconcilers(), loaded.metricsInterval, logger.With("loop", "metrics"))
+	running := loops{
+		commands:   command.NewPool(cp, tenantRoutes, loaded.pollInterval, loaded.commandSlots, logger),
+		backups:    command.NewLoop(cp, backupRoutes, loaded.pollInterval, logger.With("loop", "backup")),
+		reconciler: reconcile.NewRunner(cp, clusters, reconcilers(), loaded.reconcileInterval, logger),
+		metrics:    reconcile.NewRunner(cp, clusters, metricsReconcilers(), loaded.metricsInterval, logger.With("loop", "metrics")),
+	}.of(loaded.role)
 	health := healthServer(loaded.healthAddr)
 
-	var running sync.WaitGroup
-	running.Add(4)
-	go func() {
-		defer running.Done()
-		loop.Run(ctx)
-	}()
-	go func() {
-		defer running.Done()
-		backupLoop.Run(ctx)
-	}()
-	go func() {
-		defer running.Done()
-		reconciler.Run(ctx)
-	}()
-	go func() {
-		defer running.Done()
-		metrics.Run(ctx)
-	}()
+	var stopped sync.WaitGroup
+	for _, loop := range running {
+		stopped.Go(func() { loop.Run(ctx) })
+	}
 	go func() {
 		err := health.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -93,7 +80,8 @@ func main() {
 			stop()
 		}
 	}()
-	logger.Info("incus-worker started", "controlPlane", loaded.cpBaseUrl, "pollInterval", loaded.pollInterval,
+	logger.Info("incus-worker started", "controlPlane", loaded.cpBaseUrl, "role", loaded.role,
+		"commandSlots", loaded.commandSlots, "pollInterval", loaded.pollInterval,
 		"reconcileInterval", loaded.reconcileInterval, "metricsInterval", loaded.metricsInterval)
 	if missing := loaded.backupTarget.Missing(); len(missing) > 0 {
 		logger.Warn("no backup target: every vm.backup and volume.backup fails until it is set", "missing", missing)
@@ -104,7 +92,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = health.Shutdown(shutdownCtx)
-	running.Wait()
+	stopped.Wait()
 }
 
 func routes(cp *controlplane.Client, clusters cluster.Clusters, imageServer string, target backup.Target) map[string]command.Route {
@@ -137,6 +125,29 @@ func routes(cp *controlplane.Client, clusters cluster.Clusters, imageServer stri
 
 		"vm.backup":     {Handler: backup.NewVm(clusters, target, objects), Timeout: backupTimeout},
 		"volume.backup": {Handler: backup.NewVolume(clusters, target, objects), Timeout: backupTimeout},
+	}
+}
+
+type runner interface {
+	Run(ctx context.Context)
+}
+
+// loops are every loop a worker has; a role runs some of them.
+type loops struct {
+	commands, backups, reconciler, metrics runner
+}
+
+// of lists the loops of role: a commands process leases, an inventory process reads the clusters, all does both.
+// Leases may come from any number of processes, while two processes of role inventory or all would read and report
+// each cluster twice per cycle (titan-ops architecture/worker-structure.md#worker-roles).
+func (l loops) of(r role) []runner {
+	switch r {
+	case roleCommands:
+		return []runner{l.commands, l.backups}
+	case roleInventory:
+		return []runner{l.reconciler, l.metrics}
+	default:
+		return []runner{l.commands, l.backups, l.reconciler, l.metrics}
 	}
 }
 

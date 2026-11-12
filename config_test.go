@@ -142,3 +142,41 @@ func TestBackupKinds_HaveALoopOfTheirOwn(t *testing.T) {
 		}
 	}
 }
+
+// Without the two variables a worker runs every loop (titan-ops architecture/worker-structure.md#worker-roles).
+func TestLoadConfig_RunsEveryLoop_WithFourCommandSlots_ByDefault(t *testing.T) {
+	loaded, err := loadConfig(lookupFrom(map[string]string{"CP_BASE_URL": "http://cp", "CP_INTERNAL_TOKEN": "t"}))
+
+	if err != nil || loaded.role != roleAll || loaded.commandSlots != 4 {
+		t.Fatalf("err %v, role %q, slots %d", err, loaded.role, loaded.commandSlots)
+	}
+}
+
+func TestLoadConfig_ReadsTheRoleAndTheCommandSlots(t *testing.T) {
+	for _, role := range []role{roleAll, roleCommands, roleInventory} {
+		loaded, err := loadConfig(lookupFrom(map[string]string{"CP_BASE_URL": "http://cp", "CP_INTERNAL_TOKEN": "t",
+			"WORKER_ROLE": string(role), "COMMAND_SLOTS": "7"}))
+
+		if err != nil || loaded.role != role || loaded.commandSlots != 7 {
+			t.Errorf("%s: err %v, role %q, slots %d", role, err, loaded.role, loaded.commandSlots)
+		}
+	}
+}
+
+// A typo must not start a pod that runs nothing, or every loop twice.
+func TestLoadConfig_UnknownRoleOrBadSlots_Fails(t *testing.T) {
+	for _, values := range []map[string]string{
+		{"WORKER_ROLE": "reconciler"},
+		{"WORKER_ROLE": "Commands"},
+		{"COMMAND_SLOTS": "0"},
+		{"COMMAND_SLOTS": "-1"},
+		{"COMMAND_SLOTS": "four"},
+	} {
+		values["CP_BASE_URL"] = "http://cp"
+		values["CP_INTERNAL_TOKEN"] = "t"
+
+		if _, err := loadConfig(lookupFrom(values)); err == nil {
+			t.Errorf("%v: started", values)
+		}
+	}
+}

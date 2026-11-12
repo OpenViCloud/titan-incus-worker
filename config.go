@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/OpenViCloud/titan-incus-worker/resource/backup"
@@ -18,7 +19,18 @@ type config struct {
 	imageServer       string
 	healthAddr        string
 	backupTarget      backup.Target
+	role              role
+	commandSlots      int
 }
+
+// role is which loops one worker process runs (titan-ops architecture/worker-structure.md#worker-roles).
+type role string
+
+const (
+	roleAll       role = "all"
+	roleCommands  role = "commands"
+	roleInventory role = "inventory"
+)
 
 // loadConfig reads the environment; lookup is os.Getenv outside tests.
 func loadConfig(lookup func(string) string) (config, error) {
@@ -52,7 +64,39 @@ func loadConfig(lookup func(string) string) (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	loaded.role, err = roleOf(valueOr(lookup("WORKER_ROLE"), string(roleAll)))
+	if err != nil {
+		return config{}, err
+	}
+	loaded.commandSlots, err = positiveIntOr(lookup, "COMMAND_SLOTS", 4)
+	if err != nil {
+		return config{}, err
+	}
 	return loaded, nil
+}
+
+func roleOf(raw string) (role, error) {
+	for _, known := range []role{roleAll, roleCommands, roleInventory} {
+		if raw == string(known) {
+			return known, nil
+		}
+	}
+	return "", fmt.Errorf("WORKER_ROLE must be %s, %s or %s, got %q", roleAll, roleCommands, roleInventory, raw)
+}
+
+func positiveIntOr(lookup func(string) string, key string, fallback int) (int, error) {
+	raw := lookup(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("%s must be positive, got %s", key, raw)
+	}
+	return parsed, nil
 }
 
 func valueOr(value string, fallback string) string {

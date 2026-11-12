@@ -47,7 +47,7 @@ jobs:
         run: go build ./...
 
       - name: Test
-        run: go test ./... -count=1
+        run: go test ./... -count=1 -race
 
   # Built on every run beside the tests, its layers kept in the Actions cache. Pushed only from main, once the tests
   # passed, by the push job reading those layers back, tagged with the full commit sha. The source label links the
