@@ -138,7 +138,8 @@ type loops struct {
 }
 
 // of lists the loops of role: the command pod leases, the inventory pod reads the clusters. Leases may come from any
-// number of pods, while two inventory pods would read and report each cluster twice per cycle.
+// number of processes, while two processes of role inventory or all would read and report each cluster twice per
+// cycle (titan-ops architecture/worker-structure.md#worker-roles).
 func (l loops) of(r role) []runner {
 	switch r {
 	case roleCommands:

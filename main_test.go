@@ -64,9 +64,9 @@ type namedRunner string
 
 func (namedRunner) Run(context.Context) {}
 
-// The command pod leases (customer commands and backups) and reports nothing of its own; the inventory pod only
+// The command pod leases (customer commands and backups) and sends no reconcile report; the inventory pod only
 // reconciles and reads metrics, so each cluster is read once per cycle however many command pods run
-// (titan-ops architecture/provider-and-worker.md#go-worker).
+// (titan-ops architecture/worker-structure.md#worker-roles).
 func TestLoopsOf_EachRole_RunsItsLoopsOnly(t *testing.T) {
 	all := loops{commands: namedRunner("commands"), backups: namedRunner("backups"),
 		reconciler: namedRunner("reconciler"), metrics: namedRunner("metrics")}

@@ -143,8 +143,7 @@ func TestBackupKinds_HaveALoopOfTheirOwn(t *testing.T) {
 	}
 }
 
-// Without the two variables a worker runs every loop, as one Deployment did before the split
-// (titan-ops architecture/provider-and-worker.md#go-worker).
+// Without the two variables a worker runs every loop (titan-ops architecture/worker-structure.md#worker-roles).
 func TestLoadConfig_RunsEveryLoop_WithFourCommandSlots_ByDefault(t *testing.T) {
 	loaded, err := loadConfig(lookupFrom(map[string]string{"CP_BASE_URL": "http://cp", "CP_INTERNAL_TOKEN": "t"}))
 

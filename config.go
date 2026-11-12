@@ -23,7 +23,7 @@ type config struct {
 	commandSlots      int
 }
 
-// role is which loops one worker process runs (titan-ops architecture/provider-and-worker.md#go-worker).
+// role is which loops one worker process runs (titan-ops architecture/worker-structure.md#worker-roles).
 type role string
 
 const (

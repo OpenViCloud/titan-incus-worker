@@ -4,7 +4,7 @@
 [Incus](https://linuxcontainers.org/incus/) (the control plane itself only reads, and relays SSH sessions). The control
 plane writes provider commands (create a VM, delete a network, sync a template…) to a table; the worker leases them
 over the control plane's `/internal` API, carries them out on the command's Incus cluster, and reports the outcome. Every
-`RECONCILE_INTERVAL` (two minutes by default) it also reads each cluster's VMs, networks,
+`RECONCILE_INTERVAL` (two minutes by default) a worker of role `inventory` or `all` also reads each cluster's VMs, networks,
 firewall rules, volumes, snapshots, templates and load balancers from Incus and reports what it sees. It never pulls
 Incus back to what was asked for.
 
@@ -23,9 +23,9 @@ go run .
 |---|---|---|
 | `CP_BASE_URL` | (required) | Control plane base URL |
 | `CP_INTERNAL_TOKEN` | (required) | Sent as `X-Internal-Token` on every `/internal` call |
-| `WORKER_ROLE` | `all` | Which loops this process runs: `commands` (customer commands and backups), `inventory` (reading every cluster: state and VM usage), or `all` of them. Command processes can run side by side; run one inventory process, or each cluster is read and reported once per process |
+| `WORKER_ROLE` | `all` | Which loops this process runs: `commands` (customer commands and backups), `inventory` (reading every cluster: state and VM usage), or `all` of them. Command processes can run side by side; run one process of role `inventory` or `all`, or each cluster is read and reported once per such process |
 | `COMMAND_SLOTS` | `4` | How many customer commands one process runs at once; backups run one at a time on a loop of their own. Which commands may run side by side is the control plane's lease rule |
-| `POLL_INTERVAL` | `2s` | How often an idle worker asks for a command |
+| `POLL_INTERVAL` | `2s` | How often each idle command slot asks for a command |
 | `RECONCILE_INTERVAL` | `2m` | How often each cluster is read from Incus |
 | `METRICS_INTERVAL` | `60s` | How often each cluster's VM usage (CPU, memory, root filesystem, disk I/O) is read from Incus and sent to the control plane |
 | `IMAGE_SERVER` | `https://images.linuxcontainers.org` | Where templates without their own image URL come from |
