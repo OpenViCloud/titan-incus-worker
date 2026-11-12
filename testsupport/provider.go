@@ -592,7 +592,9 @@ func (p *Provider) DeleteImage(ctx context.Context, fingerprint string) error {
 
 func (p *Provider) PatchInstance(ctx context.Context, project string, name string, instance api.InstancePut) error {
 	p.count()
-	p.instanceVersions[project+"/"+name]++
+	if p.PatchInstanceErr == nil {
+		p.instanceVersions[project+"/"+name]++
+	}
 	p.PatchedInstances = append(p.PatchedInstances, instance)
 	return p.PatchInstanceErr
 }
@@ -603,7 +605,9 @@ func (p *Provider) UpdateInstance(ctx context.Context, project string, name stri
 	if etag != "" && etag != strconv.Itoa(p.instanceVersions[key]) {
 		return api.StatusErrorf(http.StatusPreconditionFailed, "ETag doesn't match")
 	}
-	p.instanceVersions[key]++
+	if p.UpdateInstanceErr == nil {
+		p.instanceVersions[key]++
+	}
 	p.UpdatedInstances = append(p.UpdatedInstances, instance)
 	if p.AfterUpdateInstance != nil {
 		p.AfterUpdateInstance()

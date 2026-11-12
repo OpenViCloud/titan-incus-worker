@@ -231,7 +231,8 @@ func TestEnsureProject(t *testing.T) {
 }
 
 // The PUT carries the ETag a detach read as If-Match, and Incus's 412 for a stale one comes back as a 412: that is what
-// keeps an overlapping run's write (titan-ops features/provider/design.md#tenant-lane).
+// keeps an overlapping run's write (titan-ops features/provider/design.md#tenant-lane). The 412 body is the one Incus
+// sent a stale ACL PUT in the lab (testdata/lab-acl-rest-2026-10-09.log), from the same EtagCheck.
 func TestUpdateInstance_SendsTheEtagAsIfMatch_AndAStaleOneComesBackAs412(t *testing.T) {
 	var mu sync.Mutex
 	ifMatch := []string{}
@@ -242,7 +243,7 @@ func TestUpdateInstance_SendsTheEtagAsIfMatch_AndAStaleOneComesBackAs412(t *test
 			ifMatch = append(ifMatch, r.Header.Get("If-Match"))
 			mu.Unlock()
 			w.WriteHeader(http.StatusPreconditionFailed)
-			io.WriteString(w, `{"type":"error","error":"ETag doesn't match","error_code":412}`)
+			io.WriteString(w, `{"type":"error","status":"","status_code":0,"operation":"","error_code":412,"error":"ETag doesn't match: 587193bada09b07b7b5b73ac40537e598d15c70e14e5be28c85e5c6b42d288dc vs stale","metadata":null}`)
 			return
 		}
 		io.WriteString(w, `{"type":"sync","status":"Success","status_code":200,"metadata":{"api_extensions":[],"api_status":"stable","api_version":"1.0","auth":"trusted","public":false}}`)
