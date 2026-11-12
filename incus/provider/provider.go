@@ -18,6 +18,9 @@ type Provider interface {
 	CreateProject(ctx context.Context, project api.ProjectsPost) error
 
 	GetInstance(ctx context.Context, project string, name string) (*api.Instance, error)
+	// GetInstanceWithEtag also returns the instance's ETag, for an UpdateInstance that must not overwrite a write made
+	// since the read.
+	GetInstanceWithEtag(ctx context.Context, project string, name string) (*api.Instance, string, error)
 	GetInstanceFull(ctx context.Context, project string, name string) (*api.InstanceFull, error)
 	CreateInstance(ctx context.Context, project string, instance api.InstancesPost) error
 	UpdateInstanceState(ctx context.Context, project string, name string, state api.InstanceStatePut) error
@@ -49,9 +52,10 @@ type Provider interface {
 	ListNetworkLoadBalancers(ctx context.Context, project string, network string) ([]api.NetworkLoadBalancer, error)
 
 	// PatchInstance merges config and devices (attach, lab-storage 04: sync); UpdateInstance replaces them, or with
-	// Restore set puts a snapshot back (detach and revert, lab-storage 04b and 05: an operation).
+	// Restore set puts a snapshot back (detach and revert, lab-storage 04b and 05: an operation). With an ETag,
+	// UpdateInstance writes only if the instance is unchanged since that read (412 otherwise); "" writes regardless.
 	PatchInstance(ctx context.Context, project string, name string, instance api.InstancePut) error
-	UpdateInstance(ctx context.Context, project string, name string, instance api.InstancePut) error
+	UpdateInstance(ctx context.Context, project string, name string, instance api.InstancePut, etag string) error
 	CreateInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) error
 	DeleteInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) error
 	// GetInstanceSnapshot answers the snapshot, or a 404 error when it is not there.

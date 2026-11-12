@@ -33,7 +33,7 @@ func (h *Revert) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return err
 	}
-	err = cl.Provider.UpdateInstance(ctx, payload.ProjectName, instance, api.InstancePut{Restore: snapshot, DiskOnly: true})
+	err = cl.Provider.UpdateInstance(ctx, payload.ProjectName, instance, api.InstancePut{Restore: snapshot, DiskOnly: true}, "")
 	if provider.IsNotFound(err) {
 		// The VM is gone: no later lease can revert it.
 		return command.Permanent(err)

@@ -61,8 +61,13 @@ func (h *Detach) GiveUp(ctx context.Context, leased command.Leased, cause error,
 }
 
 // removeDisk drops every disk device of the instance whose source is the volume. An instance gone has no device left.
+// The PUT replaces the whole device list, so it carries the read's ETag: a run that overlaps this one (a lease that ran
+// out while its run went on, titan-ops features/provider/design.md#tenant-lane) may have written the instance since, and
+// Incus then refuses the stale list (412: EtagCheck in cmd/incusd/instance_put.go of v7.0.1; the ETag covers devices and
+// config, volatile keys too, so a state change in between also refuses it). That error is retryable: the next run reads
+// the instance again.
 func removeDisk(ctx context.Context, p provider.Provider, project string, name string, volume string) error {
-	instance, err := p.GetInstance(ctx, project, name)
+	instance, etag, err := p.GetInstanceWithEtag(ctx, project, name)
 	if provider.IsNotFound(err) {
 		return nil
 	}
@@ -81,5 +86,5 @@ func removeDisk(ctx context.Context, p provider.Provider, project string, name s
 	if !removed {
 		return nil
 	}
-	return p.UpdateInstance(ctx, project, name, put)
+	return p.UpdateInstance(ctx, project, name, put, etag)
 }

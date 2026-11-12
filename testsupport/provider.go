@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -96,7 +97,11 @@ type Provider struct {
 	GetVolumeErr      error
 	// AfterUpdateInstance runs after each recorded UpdateInstance: a test makes the fake follow what Incus would
 	// change, such as a volume's used_by once its disk device is gone.
-	AfterUpdateInstance    func()
+	AfterUpdateInstance func()
+	// AfterGetInstance runs after each GetInstance and GetInstanceWithEtag: a test writes the instance there, as another
+	// run would between a read and a write. An instance's ETag is its write count, as text.
+	AfterGetInstance       func()
+	instanceVersions       map[string]int
 	CreatedVolumes         []api.StorageVolumesPost
 	CreateVolumeErr        error
 	DeletedVolumes         []string
@@ -160,6 +165,7 @@ func NewProvider() *Provider {
 		LoadBalancers:      map[string]*api.NetworkLoadBalancer{},
 		MissingNetworks:    map[string]bool{},
 		aclVersions:        map[string]int{},
+		instanceVersions:   map[string]int{},
 		NetworkEtag:        "network-etag",
 		ImageArchitectures: map[string]string{},
 		// An x86_64 server.
@@ -195,12 +201,37 @@ func (p *Provider) CreateProject(ctx context.Context, project api.ProjectsPost) 
 }
 
 func (p *Provider) GetInstance(ctx context.Context, project string, name string) (*api.Instance, error) {
+	instance, _, err := p.GetInstanceWithEtag(ctx, project, name)
+	return instance, err
+}
+
+// GetInstanceWithEtag answers a copy of the devices and config, as Incus answers a fresh body: a handler editing them
+// changes nothing here.
+func (p *Provider) GetInstanceWithEtag(ctx context.Context, project string, name string) (*api.Instance, string, error) {
 	p.count()
-	instance, found := p.Instances[project+"/"+name]
+	key := project + "/" + name
+	instance, found := p.Instances[key]
 	if !found {
-		return nil, NotFound("Instance not found")
+		return nil, "", NotFound("Instance not found")
 	}
-	return instance, nil
+	copied := *instance
+	copied.Config = maps.Clone(instance.Config)
+	copied.Devices = map[string]map[string]string{}
+	for device, settings := range instance.Devices {
+		copied.Devices[device] = maps.Clone(settings)
+	}
+	etag := strconv.Itoa(p.instanceVersions[key])
+	if p.AfterGetInstance != nil {
+		p.AfterGetInstance()
+	}
+	return &copied, etag, nil
+}
+
+// WriteInstance changes an instance's devices as another writer would, so its ETag changes.
+func (p *Provider) WriteInstance(project string, name string, change func(devices map[string]map[string]string)) {
+	key := project + "/" + name
+	change(p.Instances[key].Devices)
+	p.instanceVersions[key]++
 }
 
 // GetInstanceFull finds the name among VirtualMachines, where a test puts an instance with its state.
@@ -561,12 +592,22 @@ func (p *Provider) DeleteImage(ctx context.Context, fingerprint string) error {
 
 func (p *Provider) PatchInstance(ctx context.Context, project string, name string, instance api.InstancePut) error {
 	p.count()
+	if p.PatchInstanceErr == nil {
+		p.instanceVersions[project+"/"+name]++
+	}
 	p.PatchedInstances = append(p.PatchedInstances, instance)
 	return p.PatchInstanceErr
 }
 
-func (p *Provider) UpdateInstance(ctx context.Context, project string, name string, instance api.InstancePut) error {
+func (p *Provider) UpdateInstance(ctx context.Context, project string, name string, instance api.InstancePut, etag string) error {
 	p.count()
+	key := project + "/" + name
+	if etag != "" && etag != strconv.Itoa(p.instanceVersions[key]) {
+		return api.StatusErrorf(http.StatusPreconditionFailed, "ETag doesn't match")
+	}
+	if p.UpdateInstanceErr == nil {
+		p.instanceVersions[key]++
+	}
 	p.UpdatedInstances = append(p.UpdatedInstances, instance)
 	if p.AfterUpdateInstance != nil {
 		p.AfterUpdateInstance()
