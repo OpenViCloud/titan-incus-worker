@@ -205,8 +205,8 @@ func (p *Provider) GetInstance(ctx context.Context, project string, name string)
 	return instance, err
 }
 
-// GetInstanceWithEtag answers a copy of the devices, as Incus answers a fresh body: a handler editing it changes nothing
-// here.
+// GetInstanceWithEtag answers a copy of the devices and config, as Incus answers a fresh body: a handler editing them
+// changes nothing here.
 func (p *Provider) GetInstanceWithEtag(ctx context.Context, project string, name string) (*api.Instance, string, error) {
 	p.count()
 	key := project + "/" + name
@@ -215,6 +215,7 @@ func (p *Provider) GetInstanceWithEtag(ctx context.Context, project string, name
 		return nil, "", NotFound("Instance not found")
 	}
 	copied := *instance
+	copied.Config = maps.Clone(instance.Config)
 	copied.Devices = map[string]map[string]string{}
 	for device, settings := range instance.Devices {
 		copied.Devices[device] = maps.Clone(settings)
@@ -591,6 +592,7 @@ func (p *Provider) DeleteImage(ctx context.Context, fingerprint string) error {
 
 func (p *Provider) PatchInstance(ctx context.Context, project string, name string, instance api.InstancePut) error {
 	p.count()
+	p.instanceVersions[project+"/"+name]++
 	p.PatchedInstances = append(p.PatchedInstances, instance)
 	return p.PatchInstanceErr
 }

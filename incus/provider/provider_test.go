@@ -229,3 +229,43 @@ func TestEnsureProject(t *testing.T) {
 		t.Fatalf("a 409 is another run that got there first: %v", err)
 	}
 }
+
+// The PUT carries the ETag a detach read as If-Match, and Incus's 412 for a stale one comes back as a 412: that is what
+// keeps an overlapping run's write (titan-ops features/provider/design.md#tenant-lane).
+func TestUpdateInstance_SendsTheEtagAsIfMatch_AndAStaleOneComesBackAs412(t *testing.T) {
+	var mu sync.Mutex
+	ifMatch := []string{}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPut && r.URL.Path == "/1.0/instances/vmaaaa" {
+			mu.Lock()
+			ifMatch = append(ifMatch, r.Header.Get("If-Match"))
+			mu.Unlock()
+			w.WriteHeader(http.StatusPreconditionFailed)
+			io.WriteString(w, `{"type":"error","error":"ETag doesn't match","error_code":412}`)
+			return
+		}
+		io.WriteString(w, `{"type":"sync","status":"Success","status_code":200,"metadata":{"api_extensions":[],"api_status":"stable","api_version":"1.0","auth":"trusted","public":false}}`)
+	}))
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: tls.RequireAnyClientCert}
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	sum := sha256.Sum256(server.Certificate().Raw)
+	certificatePem, keyPem := clientIdentity(t)
+	connected, err := Connect(Credentials{Endpoint: server.URL, ServerFingerprint: hex.EncodeToString(sum[:]),
+		ClientCertificatePem: certificatePem, ClientKeyPem: keyPem})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = NewIncus(connected).UpdateInstance(context.Background(), "t-x", "vmaaaa", api.InstancePut{}, "etag-of-the-read")
+
+	if !api.StatusErrorCheck(err, http.StatusPreconditionFailed) {
+		t.Fatalf("want the 412, got %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(ifMatch) != 1 || ifMatch[0] != "etag-of-the-read" {
+		t.Fatalf("If-Match sent: %q", ifMatch)
+	}
+}
