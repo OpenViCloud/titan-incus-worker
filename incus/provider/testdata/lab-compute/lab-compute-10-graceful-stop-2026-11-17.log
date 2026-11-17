@@ -1,0 +1,33 @@
+# Lab compute 10: graceful stop (no force, timeout) of a VM soon after its first boot, then the SSH host keys after a start; and a shutdown that times out · Incus 7.0.2 on dev titan-incus (project default, VM lab-stop-1 from tpl-0a5e0000-0000-4000-8000-000000000002, deleted after) · 2026-11-17T02:14:23Z
+# `incus` CLI on the host, not REST. `systemctl is-active ssh.service ssh.socket` prints the service, then the socket. The
+# server is 7.0.2; the Incus source that resource/vm cites is v7.0.1.
+== launch
+Launching lab-stop-1
+
+The instance you are starting doesn't have any network attached to it.
+  To create a new network, use: incus network create
+  To attach a network to an instance, use: incus network attach
+
+launched at 02:14:28
+agent up after 25 s
+== keys before stop (02:15:13)
+-rw------- 1 root root  505 Nov 17 02:14 /etc/ssh/ssh_host_ecdsa_key
+-rw------- 1 root root  411 Nov 17 02:14 /etc/ssh/ssh_host_ed25519_key
+-rw------- 1 root root 2602 Nov 17 02:14 /etc/ssh/ssh_host_rsa_key
+== incus stop --timeout 120 (graceful), started 02:15:14, 46 s after launch
+exit=0 after 33 s
+lab-stop-1,STOPPED
+== start
+== keys and sshd after start (02:16:28)
+-rw------- 1 root root  505 Nov 17 02:14 /etc/ssh/ssh_host_ecdsa_key
+-rw------- 1 root root  411 Nov 17 02:14 /etc/ssh/ssh_host_ed25519_key
+-rw------- 1 root root 2602 Nov 17 02:14 /etc/ssh/ssh_host_rsa_key
+active
+inactive
+== shutdown that times out: incus stop --timeout 1 right after a start
+Error: Failed shutting down instance, status is "Running": context deadline exceeded
+Try `incus info --show-log lab-stop-1` for more info
+exit=1 after 1 s
+lab-stop-1,RUNNING
+== cleanup
+exit=0

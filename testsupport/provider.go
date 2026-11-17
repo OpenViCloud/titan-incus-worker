@@ -32,11 +32,13 @@ type Provider struct {
 	Projects        map[string]bool
 	CreatedProjects []api.ProjectsPost
 
-	Instances              map[string]*api.Instance // key: project + "/" + name
-	CreatedInstances       []api.InstancesPost
-	CreateInstanceErr      error
-	StateChanges           []api.InstanceStatePut
-	UpdateStateErr         error
+	Instances         map[string]*api.Instance // key: project + "/" + name
+	CreatedInstances  []api.InstancesPost
+	CreateInstanceErr error
+	StateChanges      []api.InstanceStatePut
+	UpdateStateErr    error
+	// UpdateStateErrs answers the state changes in turn (nil is success); once it runs out, UpdateStateErr answers.
+	UpdateStateErrs        []error
 	DeletedInstances       []string
 	DeleteInstanceErr      error
 	VirtualMachines        []api.InstanceFull
@@ -278,6 +280,11 @@ func copiedDevices(source map[string]map[string]string, requested map[string]map
 func (p *Provider) UpdateInstanceState(ctx context.Context, project string, name string, state api.InstanceStatePut) error {
 	p.count()
 	p.StateChanges = append(p.StateChanges, state)
+	if len(p.UpdateStateErrs) > 0 {
+		err := p.UpdateStateErrs[0]
+		p.UpdateStateErrs = p.UpdateStateErrs[1:]
+		return err
+	}
 	return p.UpdateStateErr
 }
 

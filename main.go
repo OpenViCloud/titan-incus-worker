@@ -35,7 +35,10 @@ import (
 // The longest one run of a kind may take. An operation that never ends must not hold its command slot for ever; past
 // the limit the run fails and is retried.
 const (
-	vmCommandTimeout      = 15 * time.Minute
+	vmCommandTimeout = 15 * time.Minute
+	// A stop waits up to the VM's stop timeout, which the control plane keeps at 1800 s or less, then powers off
+	// (titan-ops features/vm/design.md#vm-stop-timeout).
+	vmStopCommandTimeout  = 40 * time.Minute
 	networkCommandTimeout = 5 * time.Minute
 	storageCommandTimeout = 15 * time.Minute
 	templateSyncTimeout   = 60 * time.Minute
@@ -100,7 +103,7 @@ func routes(cp *controlplane.Client, clusters cluster.Clusters, imageServer stri
 	return map[string]command.Route{
 		"vm.create":            {Handler: vm.NewCreate(cp, clusters), Timeout: vmCommandTimeout},
 		"vm.delete":            {Handler: vm.NewDelete(cp, clusters), Timeout: vmCommandTimeout},
-		"vm.stop":              {Handler: vm.NewStop(cp, clusters), Timeout: vmCommandTimeout},
+		"vm.stop":              {Handler: vm.NewStop(cp, clusters), Timeout: vmStopCommandTimeout},
 		"vm.start":             {Handler: vm.NewStart(cp, clusters), Timeout: vmCommandTimeout},
 		"network.create":       {Handler: network.NewCreate(cp, clusters), Timeout: networkCommandTimeout},
 		"network.delete":       {Handler: network.NewDelete(cp, clusters), Timeout: networkCommandTimeout},

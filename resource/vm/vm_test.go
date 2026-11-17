@@ -263,8 +263,8 @@ func TestStop_AlreadyStopped_IsSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("want success, got %v", err)
 	}
-	if p.StateChanges[0].Action != "stop" || !p.StateChanges[0].Force {
-		t.Fatalf("want a forced stop, got %+v", p.StateChanges[0])
+	if p.StateChanges[0].Action != "stop" || p.StateChanges[0].Force {
+		t.Fatalf("want a clean shutdown, got %+v", p.StateChanges[0])
 	}
 	if got := logs.Objects("already in the asked state"); len(got) != 1 {
 		t.Fatalf("want 1 line(s) %q, got %v", "already in the asked state", got)
