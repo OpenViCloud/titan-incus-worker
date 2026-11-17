@@ -97,6 +97,16 @@ func TestRoutes_CoverTheControlPlanesKinds(t *testing.T) {
 	}
 }
 
+// A stop may wait the longest stop timeout a VM takes, 1800 s, before it powers the VM off
+// (titan-ops features/vm/design.md#vm-stop-timeout).
+func TestRoutes_AStopOutlastsTheLongestStopTimeout(t *testing.T) {
+	stop := routes(nil, nil, "", backup.Target{})["vm.stop"]
+
+	if stop.Timeout < 1800*time.Second+5*time.Minute {
+		t.Fatalf("vm.stop gives up after %s", stop.Timeout)
+	}
+}
+
 func TestLoadConfig_ReadsTheBackupTarget_AndStartsWithoutIt(t *testing.T) {
 	loaded, err := loadConfig(lookupFrom(map[string]string{
 		"CP_BASE_URL": "http://cp", "CP_INTERNAL_TOKEN": "t",
