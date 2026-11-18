@@ -8,11 +8,17 @@ import (
 	"net/url"
 
 	"github.com/OpenViCloud/titan-incus-worker/controlplane"
+	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 )
 
-// The tenant reads this fixed reason; the raw error goes to the admin-only detail
+// The tenant reads one of these fixed reasons; the raw error goes to the admin-only detail
 // (titan-ops architecture/desired-and-current.md#request-failure).
-const reasonCreateFailed = "Adding the key failed due to a system error. Please try again or contact support."
+const (
+	reasonCreateFailed = "Adding the key failed due to a system error. Please try again or contact support."
+	// reasonAgentNotRunning: the give-up's last error was the guest agent not up yet (titan-ops
+	// features/vm/design.md#vm-key-addition), the one case measured on dev where the cause is worth naming.
+	reasonAgentNotRunning = "The VM is still starting, so the key could not be added yet. Try again in a few minutes."
+)
 
 // RequestEnd is the body of PATCH /internal/vms/{vmId}/key-additions/{keyAdditionId}/requests/{requestId}
 // (EndVmKeyAdditionRequestEndpoint.cs, control plane branch feat/vm-key-additions — titan-ops
@@ -30,7 +36,11 @@ func done(restartNeeded bool) RequestEnd {
 }
 
 func failed(cause error) RequestEnd {
-	return RequestEnd{Outcome: controlplane.OutcomeFailed, Reason: reasonCreateFailed, Detail: controlplane.Detail(cause)}
+	reason := reasonCreateFailed
+	if provider.IsAgentNotRunning(cause) {
+		reason = reasonAgentNotRunning
+	}
+	return RequestEnd{Outcome: controlplane.OutcomeFailed, Reason: reason, Detail: controlplane.Detail(cause)}
 }
 
 func endRequest(ctx context.Context, cp *controlplane.Client, vmId string, keyAdditionId string, requestId string,
