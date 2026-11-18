@@ -31,25 +31,38 @@ const (
 	keyIpv6RouterOnUplink = "volatile.network.ipv6.address"
 )
 
-// DefaultAction merges the network's two policies into the one action Incus applies between VMs of an isolated
-// network: there every packet is one VM's egress and another's ingress, and only the egress default takes effect
-// (titan-ops features/network/design.md#firewall-default-policy). Either Deny blocks; a missing policy (a command enqueued
-// before the ingress one was sent) is Allow.
-func DefaultAction(ingressPolicy string, egressPolicy string) (string, error) {
-	denies := false
-	for _, policy := range []string{ingressPolicy, egressPolicy} {
-		switch policy {
-		case "", "Allow":
-		case "Deny":
-			denies = true
-		default:
-			return "", fmt.Errorf("unknown network policy %q", policy)
-		}
-	}
-	if denies {
+// DefaultAction is what Incus does with traffic of one direction that no rule allows: Deny drops it, Allow lets it
+// through. Each policy sets its own direction; Deny on ingress drops what comes from outside the network, while the VMs
+// of the network still reach each other, as Incus applies only the egress default between them
+// (titan-ops features/network/design.md#firewall-default-policy). A missing policy (a command enqueued before the policy
+// was sent) is Allow.
+func DefaultAction(policy string) (string, error) {
+	switch policy {
+	case "", "Allow":
+		return "allow", nil
+	case "Deny":
 		return "drop", nil
+	default:
+		return "", fmt.Errorf("unknown network policy %q", policy)
 	}
-	return "allow", nil
+}
+
+// DefaultActions are the default actions of the two directions of a network.
+type DefaultActions struct {
+	Ingress string
+	Egress  string
+}
+
+func defaultActionsOf(ingressPolicy string, egressPolicy string) (DefaultActions, error) {
+	ingress, err := DefaultAction(ingressPolicy)
+	if err != nil {
+		return DefaultActions{}, err
+	}
+	egress, err := DefaultAction(egressPolicy)
+	if err != nil {
+		return DefaultActions{}, err
+	}
+	return DefaultActions{Ingress: ingress, Egress: egress}, nil
 }
 
 type createPayload struct {
@@ -106,7 +119,7 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return command.Permanent(err)
 	}
-	defaultAction, err := DefaultAction(payload.DefaultIngressPolicy, payload.DefaultEgressPolicy)
+	defaultActions, err := defaultActionsOf(payload.DefaultIngressPolicy, payload.DefaultEgressPolicy)
 	if err != nil {
 		return command.Permanent(err)
 	}
@@ -114,7 +127,7 @@ func (h *Create) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return err
 	}
-	request, err := NetworkRequest(payload, address.Cidr, defaultAction, cl.OvnUplinkNetwork, publicIpv6)
+	request, err := NetworkRequest(payload, address.Cidr, defaultActions, cl.OvnUplinkNetwork, publicIpv6)
 	if err != nil {
 		return command.Permanent(fmt.Errorf("cluster %s: %w", leased.ClusterId, err))
 	}
@@ -378,17 +391,17 @@ func publicIpv6Mismatch(name string, config map[string]string, uplink string, pu
 // NetworkRequest: tenant IPv4 reaches only the VMs of its own network — no router out, no NAT, and two tenants may use
 // the same CIDR (titan-ops architecture/vm-network.md#no-ipv4-egress). Without public IPv6 the network has no uplink at all;
 // with it, the network goes on the cluster's uplink with its /64, no NAT, and its router at the address the OVH route of
-// that /64 points to (titan-ops infra/incus/design.md#ipv6-ovn-uplink). The network carries its ACL, with defaultAction for
-// traffic no rule allows.
-func NetworkRequest(payload createPayload, ipv4Address string, defaultAction string, uplink string, publicIpv6 PublicIpv6) (api.NetworksPost, error) {
+// that /64 points to (titan-ops infra/incus/design.md#ipv6-ovn-uplink). The network carries its ACL, with the default action of
+// each direction for traffic no rule allows.
+func NetworkRequest(payload createPayload, ipv4Address string, defaultActions DefaultActions, uplink string, publicIpv6 PublicIpv6) (api.NetworksPost, error) {
 	config := map[string]string{
 		"ipv4.address":    ipv4Address,
 		"ipv4.nat":        "false",
 		keyIpv6Address:    "none",
 		keyUplink:         "none",
 		keyAcls:           provider.NetworkAclName(payload.NetworkId),
-		keyDefaultIngress: defaultAction,
-		keyDefaultEgress:  defaultAction,
+		keyDefaultIngress: defaultActions.Ingress,
+		keyDefaultEgress:  defaultActions.Egress,
 	}
 	if publicIpv6.IsOn() {
 		if uplink == "" {
