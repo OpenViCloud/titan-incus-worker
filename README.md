@@ -41,7 +41,7 @@ Packages are grouped by role, and imports go one way (`dependency_test.go` fails
 |---|---|
 | `main.go` | The one place that knows every package: routes each command kind and starts the loops of its `WORKER_ROLE`; backups run on a command loop of their own, so a long upload never holds a tenant's command |
 | `loop/command`, `loop/reconcile` | Lease, retry and log each command · the reconcile cycle per cluster and kind; know no resource |
-| `resource/<kind>/` | One resource each: a file per verb, its report and, for most, its reconciler · `resource/backup/` is the one exception: it backs up two resources (`vm.go`, `volume.go`), has no callback, so no report, and no reconciler |
+| `resource/<kind>/` | One resource each: a file per verb, its report and, for most, its reconciler · `resource/backup/` is the one exception: it backs up two resources (`vm.go`, `volume.go`), has no callback, so no report, and no reconciler · `resource/vmkeyaddition/` has a report but no reconciler: a key addition leaves nothing on Incus to observe |
 | `incus/provider`, `incus/cluster` | The Incus port and every name Titan gives things on Incus · cluster id → connection |
 | `controlplane/` | Calls the control plane |
 | `bucket/` | Reads the backup bucket: whether a backup's object arrived |

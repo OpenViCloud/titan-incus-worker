@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -339,6 +340,44 @@ func (p *Incus) DeleteInstanceSnapshot(ctx context.Context, project string, inst
 	}
 	if err := WaitOperation(ctx, p.server, operation.Get().ID); err != nil {
 		return fmt.Errorf("delete snapshot %s/%s in project %s: %w", instance, snapshot, project, err)
+	}
+	return nil
+}
+
+// GetInstanceFile reads a path from the instance's guest filesystem through the Incus agent. A directory answers no
+// content and no error (its listing is not read; callers only use this to test existence).
+func (p *Incus) GetInstanceFile(ctx context.Context, project string, instance string, path string) ([]byte, error) {
+	content, resp, err := p.server.UseProject(project).GetInstanceFile(instance, path)
+	if err != nil {
+		return nil, fmt.Errorf("get file %s of instance %s in project %s: %w", path, instance, project, err)
+	}
+	if resp.Type == "directory" {
+		return nil, nil
+	}
+	defer content.Close()
+	data, err := io.ReadAll(content)
+	if err != nil {
+		return nil, fmt.Errorf("read file %s of instance %s in project %s: %w", path, instance, project, err)
+	}
+	return data, nil
+}
+
+// CreateInstanceFile writes a regular file whole: WriteMode "overwrite" replaces whatever was there, never appends.
+func (p *Incus) CreateInstanceFile(ctx context.Context, project string, instance string, path string, content []byte, uid int64, gid int64, mode int) error {
+	args := incus.InstanceFileArgs{
+		Content: bytes.NewReader(content), UID: uid, GID: gid, Mode: mode, Type: "file", WriteMode: "overwrite",
+	}
+	if err := p.server.UseProject(project).CreateInstanceFile(instance, path, args); err != nil {
+		return fmt.Errorf("create file %s of instance %s in project %s: %w", path, instance, project, err)
+	}
+	return nil
+}
+
+// CreateInstanceDirectory makes one directory, owned by root, mode 0755.
+func (p *Incus) CreateInstanceDirectory(ctx context.Context, project string, instance string, path string) error {
+	args := incus.InstanceFileArgs{UID: 0, GID: 0, Mode: 0755, Type: "directory"}
+	if err := p.server.UseProject(project).CreateInstanceFile(instance, path, args); err != nil {
+		return fmt.Errorf("create directory %s of instance %s in project %s: %w", path, instance, project, err)
 	}
 	return nil
 }

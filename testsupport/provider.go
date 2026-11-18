@@ -87,6 +87,16 @@ type Provider struct {
 	PatchInstanceErr      error
 	UpdatedInstances      []api.InstancePut
 	UpdateInstanceErr     error
+	// InstanceFiles holds each VM's guest files, keyed project + "/" + instance + "/" + path; a key not there is
+	// absent, matching Incus's answer for a path it never wrote. GetInstanceFileErr/CreateInstanceFileErr fail a pull
+	// or a push outright; InstanceNotRunning fails every file call the way a stopped VM does ("Instance is not
+	// running"). CreatedFiles and CreatedDirectories name every path written, in call order.
+	InstanceFiles         map[string][]byte
+	GetInstanceFileErr    error
+	CreateInstanceFileErr error
+	InstanceNotRunning    bool
+	CreatedFiles          []string
+	CreatedDirectories    []string
 	InstanceSnapshots     map[string]bool // key: project + "/" + instance + "/" + snapshot
 	// SnapshotDevices holds the instance's devices at the time of each snapshot, under the same key.
 	SnapshotDevices map[string]map[string]map[string]string
@@ -158,6 +168,7 @@ func NewProvider() *Provider {
 	return &Provider{
 		Projects:           map[string]bool{},
 		Instances:          map[string]*api.Instance{},
+		InstanceFiles:      map[string][]byte{},
 		InstanceSnapshots:  map[string]bool{},
 		SnapshotDevices:    map[string]map[string]map[string]string{},
 		Volumes:            map[string]*api.StorageVolume{},
@@ -663,6 +674,49 @@ func (p *Provider) DeleteInstanceSnapshot(ctx context.Context, project string, i
 	}
 	delete(p.InstanceSnapshots, key)
 	p.BackupOrder = append(p.BackupOrder, "delete-snapshot "+key)
+	return nil
+}
+
+// instanceNotRunning is the text IsInstanceNotRunning matches (titan-ops features/vm/design.md#vm-key-addition: measured
+// through the CLI's SFTP wrapper; the fake does not reproduce that wrapper, only the text the classifier reads).
+func instanceNotRunning() error {
+	return errors.New("Instance is not running")
+}
+
+func (p *Provider) GetInstanceFile(ctx context.Context, project string, instance string, path string) ([]byte, error) {
+	p.count()
+	if p.InstanceNotRunning {
+		return nil, instanceNotRunning()
+	}
+	if p.GetInstanceFileErr != nil {
+		return nil, p.GetInstanceFileErr
+	}
+	content, found := p.InstanceFiles[project+"/"+instance+"/"+path]
+	if !found {
+		return nil, NotFound("file does not exist")
+	}
+	return content, nil
+}
+
+func (p *Provider) CreateInstanceFile(ctx context.Context, project string, instance string, path string, content []byte, uid int64, gid int64, mode int) error {
+	p.count()
+	if p.InstanceNotRunning {
+		return instanceNotRunning()
+	}
+	if p.CreateInstanceFileErr != nil {
+		return p.CreateInstanceFileErr
+	}
+	p.InstanceFiles[project+"/"+instance+"/"+path] = content
+	p.CreatedFiles = append(p.CreatedFiles, path)
+	return nil
+}
+
+func (p *Provider) CreateInstanceDirectory(ctx context.Context, project string, instance string, path string) error {
+	p.count()
+	if p.InstanceNotRunning {
+		return instanceNotRunning()
+	}
+	p.CreatedDirectories = append(p.CreatedDirectories, path)
 	return nil
 }
 
