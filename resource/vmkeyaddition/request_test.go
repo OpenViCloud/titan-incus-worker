@@ -12,6 +12,13 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
+// agentNotRunningError is the text IsAgentNotRunning matches (titan-ops features/vm/design.md#vm-key-addition),
+// as GetInstanceFile wraps it on the dev lab.
+func agentNotRunningError() error {
+	return errors.New("get file /etc/ssh/openvicloud/ubuntu of instance " + instance + " in project " + project +
+		": VM agent isn't currently running")
+}
+
 // A command ends the request it carries on that request's own route, under the VM (resource-lifecycle.md#callback-routes):
 // Done with restartNeeded, or Failed with a fixed reason and the raw error, cut, as detail.
 
@@ -54,6 +61,24 @@ func TestGiveUp_EndsTheRequestFailed_WithAFixedReason_AndTheRawErrorAsDetail(t *
 	body := requestEnd(t, cp)
 	_, hasRestart := body["restartNeeded"]
 	if body["outcome"] != "Failed" || body["reason"] != reasonCreateFailed || body["detail"] != "raw: agent timeout" || hasRestart {
+		t.Errorf("report %v", body)
+	}
+}
+
+// A give-up whose last error is the guest agent not up yet reads a reason naming that, not the generic one
+// (titan-ops features/vm/design.md#vm-key-addition): the raw error still goes to detail.
+func TestGiveUp_AgentNotRunning_EndsTheRequestFailed_WithTheAgentReason(t *testing.T) {
+	cp := testsupport.NewControlPlane(t)
+	p := testsupport.NewProvider()
+	cause := agentNotRunningError()
+
+	err := NewCreate(cp.Client(), clusters(p)).GiveUp(context.Background(), createLeased(), cause, testsupport.DiscardLogger())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := requestEnd(t, cp)
+	if body["outcome"] != "Failed" || body["reason"] != reasonAgentNotRunning || body["detail"] != cause.Error() {
 		t.Errorf("report %v", body)
 	}
 }

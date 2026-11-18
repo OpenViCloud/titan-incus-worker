@@ -184,9 +184,10 @@ func parentDir(path string) string {
 	return path[:idx]
 }
 
-// classify marks "Instance is not running" permanent (the tenant restarting it is not a retry's job); every other
-// error, including the agent on a Running VM not yet up, is not measured on the dev lab and stays retryable by the
-// loop's default (command.IsRetryable).
+// classify marks "Instance is not running" permanent (the tenant restarting it is not a retry's job); the agent on a
+// Running VM not yet up (provider.IsAgentNotRunning) is retryable by the loop's default (command.IsRetryable), like
+// every other error — the agent coming up is only a matter of time, and GiveUp names it to the tenant specifically
+// when the command runs out of leases first (report.go, titan-ops features/vm/design.md#vm-key-addition).
 func classify(content []byte, err error) ([]byte, error) {
 	return content, classifyErr(err)
 }

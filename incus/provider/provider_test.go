@@ -105,6 +105,20 @@ func TestIsInstanceAlreadyExists_MatchesTheLabsSynchronous500(t *testing.T) {
 	}
 }
 
+func TestIsAgentNotRunning_MatchesTheLabsText(t *testing.T) {
+	err := errors.New("get file /etc/ssh/openvicloud/ubuntu of instance vm1 in project t-1: VM agent isn't currently running")
+
+	if !IsAgentNotRunning(err) {
+		t.Fatal("missed the lab's agent-not-running answer")
+	}
+	if IsAgentNotRunning(errors.New("disk full")) {
+		t.Fatal("matched an unrelated error")
+	}
+	if IsAgentNotRunning(nil) {
+		t.Fatal("matched nil")
+	}
+}
+
 // pinTestServer is a TLS 1.3 server that asks for a client certificate and answers GET /1.0 like Incus.
 type pinTestServer struct {
 	server      *httptest.Server

@@ -167,6 +167,16 @@ func IsInstanceNotRunning(err error) bool {
 	return strings.Contains(err.Error(), "Instance is not running")
 }
 
+// IsAgentNotRunning: a file pull or push reaching a Running VM whose guest agent has not come up yet (measured on
+// the dev lab, titan-ops features/vm/design.md#vm-key-addition: minutes after Running on a VM key addition hits
+// right away). Not Permanent: the agent coming up is only a matter of time, unlike IsInstanceNotRunning.
+func IsAgentNotRunning(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "VM agent isn't currently running")
+}
+
 // IsOperationFailureContaining: the stop/start "already stopped"/"already running" answers arrive as a failed
 // operation, not as an error from the request (lab 05).
 func IsOperationFailureContaining(err error, text string) bool {
