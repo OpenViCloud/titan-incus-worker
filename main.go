@@ -27,6 +27,7 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/resource/network"
 	"github.com/OpenViCloud/titan-incus-worker/resource/template"
 	"github.com/OpenViCloud/titan-incus-worker/resource/vm"
+	"github.com/OpenViCloud/titan-incus-worker/resource/vmkeyaddition"
 	"github.com/OpenViCloud/titan-incus-worker/resource/vmsnapshot"
 	"github.com/OpenViCloud/titan-incus-worker/resource/volsnapshot"
 	"github.com/OpenViCloud/titan-incus-worker/resource/volume"
@@ -125,6 +126,7 @@ func routes(cp *controlplane.Client, clusters cluster.Clusters, imageServer stri
 		"vm-snapshot.create":      {Handler: vmsnapshot.NewCreate(cp, clusters), Timeout: vmCommandTimeout},
 		"vm-snapshot.revert":      {Handler: vmsnapshot.NewRevert(cp, clusters), Timeout: vmCommandTimeout},
 		"vm-snapshot.delete":      {Handler: vmsnapshot.NewDelete(cp, clusters), Timeout: vmCommandTimeout},
+		"vm-key-addition.create":  {Handler: vmkeyaddition.NewCreate(cp, clusters), Timeout: vmCommandTimeout},
 
 		"vm.backup":     {Handler: backup.NewVm(clusters, target, objects), Timeout: backupTimeout},
 		"volume.backup": {Handler: backup.NewVolume(clusters, target, objects), Timeout: backupTimeout},

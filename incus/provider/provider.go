@@ -61,6 +61,15 @@ type Provider interface {
 	// GetInstanceSnapshot answers the snapshot, or a 404 error when it is not there.
 	GetInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) (*api.InstanceSnapshot, error)
 
+	// A VM's guest filesystem through the Incus agent (vm-key-addition: reading and writing the sshd key file and its
+	// config, titan-ops features/vm/design.md#ssh-key). GetInstanceFile answers IsInstanceFileNotFound when the path is
+	// absent, nil content for a directory. CreateInstanceFile writes a regular file whole (overwrite, not append), the
+	// owner/mode given. CreateInstanceDirectory makes one directory (mode 0755, root); the caller creates each missing
+	// ancestor itself, "incus file push --create-dirs" being a client-side walk, not a flag of this call.
+	GetInstanceFile(ctx context.Context, project string, instance string, path string) ([]byte, error)
+	CreateInstanceFile(ctx context.Context, project string, instance string, path string, content []byte, uid int64, gid int64, mode int) error
+	CreateInstanceDirectory(ctx context.Context, project string, instance string, path string) error
+
 	// Custom volumes of a storage pool. CreateVolume makes an empty volume or, with a copy source, a volume from a
 	// snapshot (restore, lab-storage 03).
 	GetVolume(ctx context.Context, project string, pool string, name string) (*api.StorageVolume, error)
@@ -134,6 +143,28 @@ func IsInstanceAlreadyExists(err error) bool {
 // snapshot does (lab-storage 05).
 func IsInstanceSnapshotAlreadyExists(err error) bool {
 	return IsOperationFailureContaining(err, `This "Instance_snapshot" entry already exists`)
+}
+
+// IsInstanceFileNotFound: a file pull of a path the instance does not have. Measured on the dev lab only through the
+// `incus file pull` CLI ("file does not exist"), which may not take the same route as GetInstanceFile; matched on 404
+// and on the text, so either shape is caught (recording needed: a direct GetInstanceFile of an absent path, to replace
+// the text match with IsNotFound alone if the status is enough).
+func IsInstanceFileNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	return IsNotFound(err) || strings.Contains(err.Error(), "file does not exist")
+}
+
+// IsInstanceNotRunning: a file push to a stopped VM. Measured on the dev lab only through the `incus file push` CLI
+// ("Instance is not running", inside its SFTP-connection failure); CreateInstanceFile does not use SFTP, so its own
+// wording for the same case is not measured (recording needed): matched on the text alone, which the CLI's wrapper
+// also contains. Permanent: the tenant restarting the VM is not a retry's job.
+func IsInstanceNotRunning(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "Instance is not running")
 }
 
 // IsOperationFailureContaining: the stop/start "already stopped"/"already running" answers arrive as a failed

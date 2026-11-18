@@ -10,6 +10,7 @@ public static class ProviderCommandKinds
     public const string VmSnapshotCreate = "vm-snapshot.create";
     public const string VmSnapshotRevert = "vm-snapshot.revert";
     public const string VmSnapshotDelete = "vm-snapshot.delete";
+    public const string VmKeyAdditionCreate = "vm-key-addition.create";
     public const string NetworkCreate = "network.create";
     public const string NetworkDelete = "network.delete";
     public const string FirewallRuleCreate = "firewall-rule.create";
@@ -27,4 +28,8 @@ public static class ProviderCommandKinds
     public const string TemplateSync = "template.sync";
     public const string VmBackup = "vm.backup";
     public const string VolumeBackup = "volume.backup";
+
+    /// The kinds the worker leases on a loop of their own; a tenant's backup and its other commands are two lanes
+    /// (titan-ops features/provider/design.md#tenant-lane).
+    public static readonly IReadOnlyList<string> Backup = [VmBackup, VolumeBackup];
 }
