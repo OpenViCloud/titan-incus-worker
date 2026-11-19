@@ -43,10 +43,10 @@ Packages are grouped by role, and imports go one way (`dependency_test.go` fails
 |---|---|
 | `main.go` | The one place that knows every package: routes each command kind and starts the loops of its `WORKER_ROLE`; backups run on a command loop of their own, so a long upload never holds a tenant's command |
 | `loop/command`, `loop/reconcile` | Lease, retry and log each command · the reconcile cycle per cluster and kind; know no resource |
-| `resource/<kind>/` | One resource each: a file per verb, its report and, for most, its reconciler · `resource/backup/` is the one exception: it backs up two resources (`vm.go`, `volume.go`), has no callback, so no report, and no reconciler · `resource/vmkeyaddition/` has a report but no reconciler: a key addition leaves nothing on Incus to observe |
+| `resource/<kind>/` | One resource each: a file per verb, its report and, for most, its reconciler · `resource/backup/` is the first exception: it backs up a VM, a volume and a cluster's config (`vm.go`, `volume.go`, `cluster.go`), has no callback, so no report, and no reconciler · `resource/restore/` rebuilds a cluster from the bucket for `WORKER_ROLE=restore`, once, with no command and no reconciler · `resource/vmkeyaddition/` has a report but no reconciler: a key addition leaves nothing on Incus to observe |
 | `incus/provider`, `incus/cluster` | The Incus port and every name Titan gives things on Incus · cluster id → connection |
 | `controlplane/` | Calls the control plane |
-| `bucket/` | Reads the backup bucket: whether a backup's object arrived |
+| `bucket/` | Reads and writes the backup bucket: whether a backup's object arrived, lists and reads objects for a restore, writes a cluster's config |
 | `testsupport/` | Test helpers shared by the packages above |
 
 `incus/provider/testdata/` holds what Incus answered in the lab (7.0.1; `lab-metrics-2026-11-10.txt` from a 7.0.2 server); the tests replay it.

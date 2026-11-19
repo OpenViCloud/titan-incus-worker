@@ -557,7 +557,7 @@ func (p *Incus) ImportVolume(ctx context.Context, project string, pool string, n
 
 // RestoreVolume asks Incus to put the volume back to snapshot, as the restore rolls an imported volume back to its
 // "backup" snapshot. Config is left nil: Incus only touches config during a restore when it is non-nil, and nil
-// keeps the volume's own (api/storage_pool_volume.go of v7.0.1).
+// keeps the volume's own (cmd/incusd/storage_volumes.go of v7.0.1).
 func (p *Incus) RestoreVolume(ctx context.Context, project string, pool string, name string, snapshot string) error {
 	put := api.StorageVolumePut{Restore: snapshot}
 	if err := p.send(ctx, "PUT", project, "/storage-pools/"+url.PathEscape(pool)+"/volumes/custom/"+url.PathEscape(name), put); err != nil {
