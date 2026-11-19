@@ -23,7 +23,7 @@ go run .
 |---|---|---|
 | `CP_BASE_URL` | (required) | Control plane base URL |
 | `CP_INTERNAL_TOKEN` | (required) | Sent as `X-Internal-Token` on every `/internal` call |
-| `WORKER_ROLE` | `all` | Which loops this process runs: `commands` (customer commands and backups), `inventory` (reading every cluster: state and VM usage), `all` of them, or `restore` (a one-shot rebuild of one cluster from the backup bucket; runs no loop, exits 0 or 1) |
+| `WORKER_ROLE` | `all` | Which loops this process runs: `commands` (customer commands and backups), `inventory` (reading every cluster: state and VM usage), `all` of them, or `restore` (a one-shot rebuild of one cluster from the backup bucket; runs no loop, exits 0 or 1). Command processes can run side by side; run one process of role `inventory` or `all`, or each cluster is read and reported once per such process |
 | `COMMAND_SLOTS` | `4` | How many customer commands one process runs at once; backups run one at a time on a loop of their own. Which commands may run side by side is the control plane's lease rule |
 | `POLL_INTERVAL` | `2s` | How often each idle command slot, and the backup loop, asks for a command |
 | `RECONCILE_INTERVAL` | `2m` | How often each cluster is read from Incus |
