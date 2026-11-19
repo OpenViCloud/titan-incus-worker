@@ -41,6 +41,10 @@ type Provider interface {
 	// matches (412 otherwise).
 	GetNetwork(ctx context.Context, project string, name string) (*api.Network, string, error)
 	UpdateNetwork(ctx context.Context, project string, name string, network api.NetworkPut, etag string) error
+	// ListNetworkLeases answers OVN's DHCP leases of one network: each instance port's address, static or dynamic,
+	// stopped VMs included, plus the network's own gateway entry. cluster.backup keeps each instance's IPv4
+	// from it, so a restore can pin the same address back (titan-ops features/backup/design.md#cluster-backup).
+	ListNetworkLeases(ctx context.Context, project string, network string) ([]api.NetworkLease, error)
 
 	// Network ACLs carry a tenant network's firewall rules (titan-ops features/network/design.md#firewall-on-incus).
 	GetNetworkACL(ctx context.Context, project string, name string) (*api.NetworkACL, string, error)

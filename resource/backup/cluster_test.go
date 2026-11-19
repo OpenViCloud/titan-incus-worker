@@ -59,6 +59,11 @@ func tenantCluster() *testsupport.Provider {
 	p.ACLs[project+"/acl-1"] = &api.NetworkACL{NetworkACLPost: api.NetworkACLPost{Name: "acl-1"}, Project: project,
 		NetworkACLPut: api.NetworkACLPut{Ingress: []api.NetworkACLRule{{Action: "allow", Description: "rule-1", State: "enabled"}}}}
 	p.LoadBalancers[project+"/net-1/2001:db8:0:d401::1:1"] = &api.NetworkLoadBalancer{ListenAddress: "2001:db8:0:d401::1:1"}
+	p.Leases[project+"/net-1"] = []api.NetworkLease{
+		{Hostname: "vm-1", Hwaddr: "00:16:3e:00:00:01", Address: "10.81.0.50", Type: "dynamic"},
+		{Hostname: "vm-1", Hwaddr: "00:16:3e:00:00:01", Address: "2001:db8:0:d401::50", Type: "dynamic"},
+		{Hostname: "net-1", Hwaddr: "00:16:3e:00:00:ff", Address: "10.81.0.1", Type: "gateway"},
+	}
 	return p
 }
 
@@ -100,6 +105,14 @@ func TestCluster_WritesTheConfigOfEveryTenantProject_ToTheClustersKey(t *testing
 	if strings.Contains(string(body), "ovnup") {
 		t.Fatalf("the uplink is in the config:\n%s", body)
 	}
+	// The gateway lease and the IPv6 one are dropped; only the instance's IPv4 is kept.
+	if len(tenant.InstanceAddresses) != 1 || tenant.InstanceAddresses[0].Network != "net-1" {
+		t.Fatalf("instance addresses: %+v", tenant.InstanceAddresses)
+	}
+	addresses := tenant.InstanceAddresses[0].Addresses
+	if len(addresses) != 1 || addresses["vm-1"] != "10.81.0.50" {
+		t.Fatalf("instance addresses: %+v", addresses)
+	}
 }
 
 func TestCluster_ABucketThatRefuses_IsRetryable(t *testing.T) {
@@ -128,6 +141,20 @@ func TestCluster_NoTargetConfigured_IsPermanent_AndWritesNothing(t *testing.T) {
 func TestCluster_AReadOfIncusThatFails_WritesNothing_AndIsRetryable(t *testing.T) {
 	p := tenantCluster()
 	p.ListACLsErr = errors.New("connection reset")
+	store := &fakeStore{}
+
+	err := newCluster(p, target, store).Run(context.Background(), clusterLeased(), testsupport.DiscardLogger())
+
+	if err == nil || !command.IsRetryable(err) || len(store.put) != 0 {
+		t.Fatalf("err %v, put %v", err, store.put)
+	}
+}
+
+// A failed lease read is the same as any other failed read of the cluster: nothing is written, and the lease is a
+// temporary condition (network trouble), not a reason to give up.
+func TestCluster_ALeaseReadThatFails_WritesNothing_AndIsRetryable(t *testing.T) {
+	p := tenantCluster()
+	p.ListLeasesErr = errors.New("connection reset")
 	store := &fakeStore{}
 
 	err := newCluster(p, target, store).Run(context.Background(), clusterLeased(), testsupport.DiscardLogger())

@@ -166,6 +166,14 @@ func (p *Incus) UpdateNetwork(ctx context.Context, project string, name string, 
 	return nil
 }
 
+func (p *Incus) ListNetworkLeases(ctx context.Context, project string, network string) ([]api.NetworkLease, error) {
+	leases, err := p.server.UseProject(project).GetNetworkLeases(network)
+	if err != nil {
+		return nil, fmt.Errorf("list leases of network %s in project %s: %w", network, project, err)
+	}
+	return leases, nil
+}
+
 func (p *Incus) GetNetworkACL(ctx context.Context, project string, name string) (*api.NetworkACL, string, error) {
 	acl, etag, err := p.server.UseProject(project).GetNetworkACL(name)
 	if err != nil {

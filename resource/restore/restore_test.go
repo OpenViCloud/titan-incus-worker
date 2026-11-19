@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"sort"
 	"strings"
@@ -76,12 +77,31 @@ func (p *orderedProvider) ImportVolume(ctx context.Context, project string, pool
 
 func (p *orderedProvider) ImportInstance(ctx context.Context, project string, pool string, name string, body io.Reader) error {
 	*p.order = append(*p.order, "import-instance "+name)
-	return p.Provider.ImportInstance(ctx, project, pool, name, body)
+	if err := p.Provider.ImportInstance(ctx, project, pool, name, body); err != nil {
+		return err
+	}
+	// An imported vm has the NIC its archive declares, as on Incus.
+	p.Provider.Instances[project+"/"+name].Devices = map[string]map[string]string{
+		"eth0": {"type": "nic", "network": "net-net1"},
+	}
+	return nil
 }
 
 func (p *orderedProvider) UpdateInstanceState(ctx context.Context, project string, name string, state api.InstanceStatePut) error {
 	*p.order = append(*p.order, "start "+name)
 	return p.Provider.UpdateInstanceState(ctx, project, name, state)
+}
+
+func (p *orderedProvider) PatchInstance(ctx context.Context, project string, name string, instance api.InstancePut) error {
+	if eth0, ok := instance.Devices["eth0"]; ok {
+		*p.order = append(*p.order, "pin-ipv4 "+name+" "+eth0["ipv4.address"])
+	}
+	return p.Provider.PatchInstance(ctx, project, name, instance)
+}
+
+func (p *orderedProvider) CreateNetworkLoadBalancer(ctx context.Context, project string, network string, loadBalancer api.NetworkLoadBalancersPost) error {
+	*p.order = append(*p.order, "create-lb "+loadBalancer.ListenAddress)
+	return p.Provider.CreateNetworkLoadBalancer(ctx, project, network, loadBalancer)
 }
 
 func logger() *slog.Logger {
@@ -162,6 +182,9 @@ func baseConfig() backup.ClusterConfig {
 						{ListenAddress: "fd00:1::10", NetworkLoadBalancerPut: api.NetworkLoadBalancerPut{Description: "lb"}},
 					}},
 				},
+				InstanceAddresses: []backup.NetworkInstanceAddresses{
+					{Network: "net-net1", Addresses: map[string]string{"vmaaaa": "10.0.0.50"}},
+				},
 			},
 		},
 	}
@@ -198,11 +221,18 @@ func TestRun_HappyPath_FullOrder_AndFiltering(t *testing.T) {
 		t.Fatalf("summary: %+v", summary)
 	}
 
-	// (1) order: project, profile, acl, network, lb, volume (import, rollback+delete backup), vm (same), start.
+	// (1) order: project, profile, acl, network, volume (import, rollback+delete backup), vm (same, pin its ipv4,
+	// start), load balancer last: OVN refuses a load balancer whose target has no logical switch port yet, which only
+	// exists once the vm is imported (titan-ops features/backup/design.md#cluster-restore).
 	gotOrder := strings.Join(*order, ",")
-	wantOrder := "import-volume volaaaa,import-instance vmaaaa,start vmaaaa"
+	wantOrder := "import-volume volaaaa,import-instance vmaaaa,pin-ipv4 vmaaaa 10.0.0.50,start vmaaaa,create-lb fd00:1::10"
 	if gotOrder != wantOrder {
 		t.Fatalf("order: got %q, want %q", gotOrder, wantOrder)
+	}
+	// Incus's PATCH replaces a whole device, so the pin carries the NIC's other keys along.
+	wantNic := map[string]string{"type": "nic", "network": "net-net1", "ipv4.address": "10.0.0.50"}
+	if len(p.PatchedInstances) != 1 || !maps.Equal(p.PatchedInstances[0].Devices["eth0"], wantNic) {
+		t.Fatalf("ipv4 pin: %+v", p.PatchedInstances)
 	}
 	if len(p.CreatedProjects) != 1 || p.CreatedProjects[0].Name != "t-proj1" {
 		t.Fatalf("projects: %+v", p.CreatedProjects)
@@ -272,6 +302,33 @@ func TestRun_HappyPath_FullOrder_AndFiltering(t *testing.T) {
 		if imported.Name == "vmbbbb" {
 			t.Fatalf("a vm titan no longer lists was imported: %+v", imported)
 		}
+	}
+}
+
+// A config with no InstanceAddresses (an older restore point, or a project whose network had no lease yet when the
+// backup ran) leaves the vm's NIC alone: nothing to pin it to.
+func TestRun_NoRecordedIpv4_LeavesTheNicAlone(t *testing.T) {
+	objects := newFakeObjects()
+	config := baseConfig()
+	config.Projects[0].InstanceAddresses = nil
+	putConfig(t, objects, config)
+	archiveAt := configTakenAt.Add(-time.Hour)
+	objects.put(archiveKeyFor("vms", "vm1", archiveAt), testsupport.ArchiveBody(backup.SnapshotName))
+
+	p, _ := newOrderedProvider()
+	cp := testsupport.NewControlPlane(t)
+	setupTitanLists(cp, map[string]string{
+		"/internal/reconcile/vms?clusterId=" + clusterId: `[{"id":"vm1","externalId":"vmaaaa","currentState":"Stopped","projectName":"t-proj1"}]`,
+	})
+
+	clusters := cluster.Fixed{clusterId: {Provider: p}}
+	summary, err := New(cp.Client(), clusters, objects).Run(context.Background(), clusterId, "", logger())
+
+	if err != nil || summary.Failed != 0 {
+		t.Fatalf("err %v, summary %+v", err, summary)
+	}
+	if len(p.PatchedInstances) != 0 {
+		t.Fatalf("a vm with no recorded address was pinned: %+v", p.PatchedInstances)
 	}
 }
 
