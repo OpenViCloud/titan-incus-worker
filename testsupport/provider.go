@@ -88,6 +88,9 @@ type Provider struct {
 	// repeating; GetNetworkReads counts every read, errors and not found included.
 	NetworkStatuses []string
 	GetNetworkReads int
+	// Leases is keyed by project + "/" + network: a test sets it to that network's DHCP leases.
+	Leases        map[string][]api.NetworkLease
+	ListLeasesErr error
 	// ACLs is keyed by project + "/" + name; an ACL's ETag is its write count, as text.
 	ACLs         map[string]*api.NetworkACL
 	aclVersions  map[string]int
@@ -237,6 +240,7 @@ func NewProvider() *Provider {
 		InstanceFiles:      map[string][]byte{},
 		InstanceSnapshots:  map[string]bool{},
 		SnapshotDevices:    map[string]map[string]map[string]string{},
+		Leases:             map[string][]api.NetworkLease{},
 		Volumes:            map[string]*api.StorageVolume{},
 		VolumeSnapshots:    map[string]bool{},
 		Aliases:            map[string]bool{},
@@ -492,6 +496,14 @@ func (p *Provider) UpdateNetwork(ctx context.Context, project string, name strin
 		}
 	}
 	return nil
+}
+
+func (p *Provider) ListNetworkLeases(ctx context.Context, project string, network string) ([]api.NetworkLease, error) {
+	p.count()
+	if p.ListLeasesErr != nil {
+		return nil, p.ListLeasesErr
+	}
+	return p.Leases[project+"/"+network], nil
 }
 
 func (p *Provider) aclEtag(key string) string {

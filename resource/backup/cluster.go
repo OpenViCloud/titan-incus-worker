@@ -34,12 +34,24 @@ type ProjectConfig struct {
 	Networks      []api.Network          `yaml:"networks"`
 	NetworkAcls   []api.NetworkACL       `yaml:"networkAcls"`
 	LoadBalancers []NetworkLoadBalancers `yaml:"loadBalancers"`
+	// InstanceAddresses: an older restore reads a config without this field and leaves every NIC alone
+	// (titan-ops features/backup/design.md#cluster-restore).
+	InstanceAddresses []NetworkInstanceAddresses `yaml:"instanceAddresses"`
 }
 
 // NetworkLoadBalancers are the load balancers of one network: Incus lists them per network.
 type NetworkLoadBalancers struct {
 	Network       string                    `yaml:"network"`
 	LoadBalancers []api.NetworkLoadBalancer `yaml:"loadBalancers"`
+}
+
+// NetworkInstanceAddresses are the IPv4 addresses this network's instance ports hold at backup time, stopped VMs
+// included: dynamic until a restore pins them static. A dynamic one follows import order, so a different restore order
+// would otherwise land each VM on a different address (measured on dev, Incus 7.0.2, OVN; titan-ops features/backup/design.md#cluster-restore).
+type NetworkInstanceAddresses struct {
+	Network string `yaml:"network"`
+	// Addresses is keyed by instance name (the lease's hostname), each value its IPv4.
+	Addresses map[string]string `yaml:"addresses"`
 }
 
 // Store writes one object to the backup bucket; package bucket is the real one.
@@ -115,7 +127,7 @@ func ReadClusterConfig(ctx context.Context, p provider.Provider, clusterId strin
 			return ClusterConfig{}, err
 		}
 		tenant := ProjectConfig{Project: project, Profiles: profiles, Networks: []api.Network{},
-			NetworkAcls: []api.NetworkACL{}, LoadBalancers: []NetworkLoadBalancers{}}
+			NetworkAcls: []api.NetworkACL{}, LoadBalancers: []NetworkLoadBalancers{}, InstanceAddresses: []NetworkInstanceAddresses{}}
 		for _, network := range networks {
 			if network.Project != project.Name {
 				continue
@@ -128,6 +140,13 @@ func ReadClusterConfig(ctx context.Context, p provider.Provider, clusterId strin
 			if len(loadBalancers) > 0 {
 				tenant.LoadBalancers = append(tenant.LoadBalancers, NetworkLoadBalancers{Network: network.Name, LoadBalancers: loadBalancers})
 			}
+			addresses, err := instanceIpv4Addresses(ctx, p, project.Name, network.Name)
+			if err != nil {
+				return ClusterConfig{}, err
+			}
+			if len(addresses) > 0 {
+				tenant.InstanceAddresses = append(tenant.InstanceAddresses, NetworkInstanceAddresses{Network: network.Name, Addresses: addresses})
+			}
 		}
 		for _, acl := range acls {
 			if acl.Project == project.Name {
@@ -137,4 +156,22 @@ func ReadClusterConfig(ctx context.Context, p provider.Provider, clusterId strin
 		config.Projects = append(config.Projects, tenant)
 	}
 	return config, nil
+}
+
+// instanceIpv4Addresses reads one network's DHCP leases and keeps each instance's IPv4, dropping its gateway entry
+// and every IPv6 one (a network's public uplink gives it IPv6 too, but the NIC's pinned address on restore is
+// IPv4 only, titan-ops features/backup/design.md#cluster-restore).
+func instanceIpv4Addresses(ctx context.Context, p provider.Provider, project string, network string) (map[string]string, error) {
+	leases, err := p.ListNetworkLeases(ctx, project, network)
+	if err != nil {
+		return nil, err
+	}
+	addresses := map[string]string{}
+	for _, lease := range leases {
+		if lease.Type == "gateway" || strings.Contains(lease.Address, ":") {
+			continue
+		}
+		addresses[lease.Hostname] = lease.Address
+	}
+	return addresses, nil
 }

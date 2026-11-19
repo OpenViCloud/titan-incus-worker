@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"time"
 
 	"github.com/lxc/incus/v7/shared/api"
@@ -113,10 +114,10 @@ func pruneVolumeSnapshots(ctx context.Context, p provider.Provider, pool string,
 	}
 }
 
-// restoreVms imports every VM Titan still lists, rolls it back to the backup snapshot, removes extra snapshots, and
-// starts it only when Titan last recorded it Running or Ready.
+// restoreVms imports every VM Titan still lists, rolls it back to the backup snapshot, removes extra snapshots, pins
+// its private IPv4 when one was recorded, and starts it only when Titan last recorded it Running or Ready.
 func restoreVms(ctx context.Context, p provider.Provider, pool string, rows []titanVm, snapshotRows []titanVmSnapshot,
-	archives map[string][]archiveKey, atOrBefore time.Time, objects Objects, logger *slog.Logger, summary *Summary) {
+	archives map[string][]archiveKey, atOrBefore time.Time, addresses map[string]string, objects Objects, logger *slog.Logger, summary *Summary) {
 	liveSnapshots := liveVmSnapshotNamesByInstance(snapshotRows)
 	for _, row := range rows {
 		if row.ExternalId == "" {
@@ -133,6 +134,9 @@ func restoreVms(ctx context.Context, p provider.Provider, pool string, rows []ti
 				"object", chosen.Key, "error", err)
 			summary.Failed++
 			continue
+		}
+		if address, recorded := addresses[row.ExternalId]; recorded {
+			pinIpv4(ctx, p, row.ProjectName, row.ExternalId, address, logger)
 		}
 		live := liveSnapshots[provider.ProjectKey(row.ProjectName, row.ExternalId)]
 		pruneVmSnapshots(ctx, p, row.ProjectName, row.ExternalId, live, logger)
@@ -183,6 +187,34 @@ func importVm(ctx context.Context, p provider.Provider, pool string, project str
 		return err
 	}
 	return p.DeleteInstanceSnapshot(ctx, project, name, backup.SnapshotName)
+}
+
+// pinIpv4 sets the VM's NIC (eth0) to the IPv4 OVN's DHCP gave it when the backup was taken. OVN otherwise hands out
+// a fresh dynamic address the moment an instance is created or imported, so importing in a different order would
+// leave every VM with a different address than before; setting it statically is accepted even while another
+// instance's port still holds it dynamically, OVN moves that one instead (measured on dev, Incus 7.0.2, OVN,
+// titan-ops features/backup/design.md#cluster-restore). Incus's PATCH replaces a whole device, so the NIC is read
+// first and sent back with the address added. A failed pin is logged and left: the VM still restores, with whatever
+// address OVN gives it.
+func pinIpv4(ctx context.Context, p provider.Provider, project string, instance string, address string, logger *slog.Logger) {
+	current, err := p.GetInstance(ctx, project, instance)
+	if err != nil {
+		logger.Warn("pinning the vm's private ipv4 failed: reading the vm", "project", project, "vm", instance, "address", address, "error", err)
+		return
+	}
+	nic, found := current.Devices["eth0"]
+	if !found {
+		logger.Warn("pinning the vm's private ipv4 skipped: the vm has no eth0 of its own", "project", project, "vm", instance, "address", address)
+		return
+	}
+	pinned := maps.Clone(nic)
+	pinned["ipv4.address"] = address
+	patch := api.InstancePut{Devices: map[string]map[string]string{"eth0": pinned}}
+	if err := p.PatchInstance(ctx, project, instance, patch); err != nil {
+		logger.Warn("pinning the vm's private ipv4 failed", "project", project, "vm", instance, "address", address, "error", err)
+		return
+	}
+	logger.Info("vm's private ipv4 pinned", "project", project, "vm", instance, "address", address)
 }
 
 func pruneVmSnapshots(ctx context.Context, p provider.Provider, project string, instance string, live map[string]bool, logger *slog.Logger) {

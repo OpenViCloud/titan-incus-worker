@@ -93,13 +93,16 @@ func (r *Restore) Run(ctx context.Context, clusterId string, point string, logge
 	for _, project := range clusterConfig.Projects {
 		restoreNetworks(ctx, p, project, liveNetworkIds[project.Project.Name], logger, &summary)
 	}
+
+	restoreVolumes(ctx, p, pool, titan.Volumes, titan.VolumeSnapshots, parsed.Archives, chosenConfig.TakenAt, r.objects, logger, &summary)
+	addresses := instanceIpv4ByName(clusterConfig.Projects)
+	restoreVms(ctx, p, pool, titan.Vms, titan.VmSnapshots, parsed.Archives, chosenConfig.TakenAt, addresses, r.objects, logger, &summary)
+	// Load balancers come after the VMs: Incus's OVN backend refuses one whose target has no logical switch port
+	// yet, which only exists once the VM is imported (measured on dev, titan-ops features/backup/design.md#cluster-restore).
 	liveVips := liveLoadBalancerVips(titan.LoadBalancers)
 	for _, project := range clusterConfig.Projects {
 		restoreLoadBalancers(ctx, p, project, liveVips, logger, &summary)
 	}
-
-	restoreVolumes(ctx, p, pool, titan.Volumes, titan.VolumeSnapshots, parsed.Archives, chosenConfig.TakenAt, r.objects, logger, &summary)
-	restoreVms(ctx, p, pool, titan.Vms, titan.VmSnapshots, parsed.Archives, chosenConfig.TakenAt, r.objects, logger, &summary)
 	restoreTemplates(ctx, r.cp, p, titan.Templates, clusterId, logger, &summary)
 
 	logger.Info("restore finished", "restored", summary.Restored, "skipped", summary.Skipped, "failed", summary.Failed)

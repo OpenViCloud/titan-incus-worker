@@ -8,6 +8,7 @@ import (
 
 	"github.com/OpenViCloud/titan-incus-worker/controlplane"
 	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
+	"github.com/OpenViCloud/titan-incus-worker/resource/backup"
 )
 
 // The row types below are declared locally rather than imported from each resource/<kind>/reconcile.go: a resource
@@ -140,6 +141,22 @@ func liveFirewallRuleIds(rows []titanFirewallRule) map[string]bool {
 		live[ruleId] = true
 	}
 	return live
+}
+
+// instanceIpv4ByName flattens every project's recorded addresses to instance name -> IPv4: an instance's Incus name
+// is unique across the whole cluster, and a VM has one NIC (eth0), so which network it came from does not matter
+// here (titan-ops features/backup/design.md#cluster-restore). A config from before this field existed has no
+// InstanceAddresses, so the map comes back empty and no VM gets pinned.
+func instanceIpv4ByName(projects []backup.ProjectConfig) map[string]string {
+	addresses := map[string]string{}
+	for _, project := range projects {
+		for _, group := range project.InstanceAddresses {
+			for instance, address := range group.Addresses {
+				addresses[instance] = address
+			}
+		}
+	}
+	return addresses
 }
 
 // liveLoadBalancerVips keys by project + "/" + network + "/" + VIP, exactly what the YAML's NetworkLoadBalancers
