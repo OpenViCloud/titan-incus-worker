@@ -12,11 +12,9 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 )
 
-// The CurrentExistence values DecideReport reads.
-const (
-	existenceExists   = "Exists"
-	existenceNotFound = "NotFound"
-)
+// The CurrentExistence value DecideReport reads; the others (NotFound, NotCreated) both mean Titan holds the network
+// as not on Incus.
+const existenceExists = "Exists"
 
 // ReconcilableNetwork mirrors ReconcilableNetworkQueryResult: what Titan last recorded, so only a difference is
 // reported. CurrentState is null while Titan has seen no Incus status.
@@ -82,12 +80,14 @@ func StatusByProjectAndName(networks []api.Network) map[string]string {
 // DecideReport compares one network with Incus: a report when the status or the existence differs from what Titan
 // recorded. The status goes as Incus spells it, whatever the word. Absent is NotFound, never Deleted: only the delete
 // command reports that, since a reconciler pointed at the wrong cluster also finds nothing
-// (titan-ops architecture/desired-and-current.md#existence-axis).
+// (titan-ops architecture/desired-and-current.md#existence-axis). Absent is reported only when Titan holds the network
+// as on Incus: a network Titan holds no status for is one whose create or delete waits with nothing seen, where the
+// control plane records an absent report as nothing new, so sending it every cycle was a write that changed nothing.
 func DecideReport(row ReconcilableNetwork, statuses map[string]string) (ObservationBody, bool) {
 	status, present := statuses[provider.ProjectKey(row.ProjectName, row.ExternalId)]
 	if !present {
-		alreadyRecorded := row.CurrentExistence == existenceNotFound
-		return ObservationBody{Exists: false}, !alreadyRecorded
+		titanHoldsItOnIncus := row.CurrentExistence == existenceExists
+		return ObservationBody{Exists: false}, titanHoldsItOnIncus
 	}
 
 	recordedState := ""

@@ -665,6 +665,10 @@ func TestDecideReport(t *testing.T) {
 		{"found again", ReconcilableNetwork{ExternalId: "net-a", CurrentExistence: "NotFound"}, true, "Created", true},
 		{"lost", ReconcilableNetwork{ExternalId: "net-x", CurrentState: strp("Created"), CurrentExistence: "Exists"}, false, "", true},
 		{"lost and recorded", ReconcilableNetwork{ExternalId: "net-x", CurrentExistence: "NotFound"}, false, "", false},
+		// A delete (or create) waiting with nothing seen on Incus: Titan already holds no status, so an absent report
+		// would change nothing and was sent every cycle.
+		{"absent while Titan holds no status", ReconcilableNetwork{ExternalId: "net-x", CurrentExistence: "NotCreated"}, false, "", false},
+		{"seen while Titan holds no status", ReconcilableNetwork{ExternalId: "net-a", CurrentExistence: "NotCreated"}, true, "Created", true},
 	}
 	for _, c := range cases {
 		got, send := DecideReport(c.row, observed)
