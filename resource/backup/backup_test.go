@@ -105,7 +105,10 @@ func newVolume(p *testsupport.Provider, configured Target) *Volume {
 	return h
 }
 
-func TestVm_BacksUpACopyOfASnapshot_NotTheRunningDisk_ToTheTargetsKey(t *testing.T) {
+// The archive is of the VM itself with every snapshot it has, taken right after a snapshot named backup: the restore
+// rolls back to that snapshot, so the archive holds one point in time although Incus reads the running disk
+// (titan-ops features/backup/design.md#incus-backup). No copy is made.
+func TestVm_BacksUpTheVmItselfWithItsSnapshots_AfterASnapshotOfThisMoment_ToTheTargetsKey(t *testing.T) {
 	p := testsupport.NewProvider()
 	runningVm(p)
 
@@ -116,16 +119,14 @@ func TestVm_BacksUpACopyOfASnapshot_NotTheRunningDisk_ToTheTargetsKey(t *testing
 	}
 	wantOrder := []string{
 		"snapshot " + project + "/" + instanceName + "/backup",
-		"copy " + project + "/" + instanceName + "/backup -> bk" + encodedId,
-		"backup-instance " + project + "/bk" + encodedId,
-		"delete-instance " + project + "/bk" + encodedId,
+		"backup-instance " + project + "/" + instanceName,
 		"delete-snapshot " + project + "/" + instanceName + "/backup",
 	}
 	if strings.Join(p.BackupOrder, "\n") != strings.Join(wantOrder, "\n") {
 		t.Fatalf("order:\n%s\nwant:\n%s", strings.Join(p.BackupOrder, "\n"), strings.Join(wantOrder, "\n"))
 	}
-	if len(p.InstanceBackups) != 1 {
-		t.Fatalf("backups: %+v", p.InstanceBackups)
+	if len(p.InstanceBackups) != 1 || len(p.Copies) != 0 {
+		t.Fatalf("backups: %+v, copies: %+v", p.InstanceBackups, p.Copies)
 	}
 	sent := p.InstanceBackups[0].Target
 	wantKey := "incus/mock/" + tenantId + "/vms/" + vmId + "/20261026T020709Z.tar.gz"
@@ -136,42 +137,8 @@ func TestVm_BacksUpACopyOfASnapshot_NotTheRunningDisk_ToTheTargetsKey(t *testing
 	}
 }
 
-// An attached volume has a backup of its own. A copy that kept the volume's device would use the volume for the whole
-// upload: Incus lists the copy in the volume's used_by, and the reconciler reports the volume attached to it.
-func TestVm_TheCopyHoldsNoAttachedVolume_KeepsEveryOtherDevice(t *testing.T) {
-	p := testsupport.NewProvider()
-	runningVm(p)
-	p.Instances[project+"/"+instanceName].Devices = map[string]map[string]string{
-		"root":        {"type": "disk", "pool": pool, "path": "/"},
-		"eth0":        {"type": "nic", "network": "net-1"},
-		"passthrough": {"type": "unix-block", "source": "/dev/sdz"},
-		"volabcdefgh": {"type": "disk", "pool": pool, "source": "volabcdefgh"},
-	}
-
-	err := newVm(p, target).Run(context.Background(), vmLeased(), testsupport.DiscardLogger())
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(p.Copies) != 1 {
-		t.Fatalf("copies: %+v", p.Copies)
-	}
-	devices := p.Copies[0].Devices
-	for name, settings := range devices {
-		if settings["type"] == "disk" && settings["source"] != "" {
-			t.Fatalf("the copy holds volume device %s: %v", name, devices)
-		}
-	}
-	isRootKept := devices["root"]["type"] == "disk" && devices["root"]["path"] == "/"
-	isNicKept := devices["eth0"]["type"] == "nic"
-	isPassthroughKept := devices["passthrough"]["type"] == "unix-block"
-	if !isRootKept || !isNicKept || !isPassthroughKept {
-		t.Fatalf("the copy lost a device that is not a volume: %v", devices)
-	}
-}
-
-// Leftovers of a run that died midway (worker restart, lease lost) are removed first, or the snapshot and the copy
-// would refuse to be made again.
+// Leftovers of a run that died midway (worker restart, lease lost) are removed first, or the snapshot would refuse to be
+// made again; so is a copy that a worker from before the archive carried snapshots left behind.
 func TestVm_ARunAfterOneThatDiedMidway_RemovesItsLeftoversFirst(t *testing.T) {
 	p := testsupport.NewProvider()
 	runningVm(p)
@@ -191,7 +158,7 @@ func TestVm_ARunAfterOneThatDiedMidway_RemovesItsLeftoversFirst(t *testing.T) {
 	}
 }
 
-// A failed upload still removes the copy and the snapshot, and is retried.
+// A failed upload still removes the snapshot, and is retried.
 func TestVm_UploadFails_CleansUp_AndIsRetryable(t *testing.T) {
 	p := testsupport.NewProvider()
 	runningVm(p)
@@ -203,7 +170,7 @@ func TestVm_UploadFails_CleansUp_AndIsRetryable(t *testing.T) {
 		t.Fatalf("want a retryable error, got %v", err)
 	}
 	order := strings.Join(p.BackupOrder, "\n")
-	if !strings.HasSuffix(order, "delete-instance "+project+"/bk"+encodedId+"\ndelete-snapshot "+project+"/"+instanceName+"/backup") {
+	if !strings.HasSuffix(order, "backup-instance "+project+"/"+instanceName+"\ndelete-snapshot "+project+"/"+instanceName+"/backup") {
 		t.Fatalf("order: %v", p.BackupOrder)
 	}
 }
@@ -264,7 +231,7 @@ func TestVm_GiveUp_RemovesLeftovers(t *testing.T) {
 	}
 }
 
-func TestVolume_BacksUpACopyOfASnapshot_ToTheTargetsKey(t *testing.T) {
+func TestVolume_BacksUpTheVolumeItselfWithItsSnapshots_AfterASnapshotOfThisMoment_ToTheTargetsKey(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.Volumes[project+"/"+volumeName] = &api.StorageVolume{Name: volumeName, Type: "custom", Project: project}
 
@@ -275,9 +242,7 @@ func TestVolume_BacksUpACopyOfASnapshot_ToTheTargetsKey(t *testing.T) {
 	}
 	wantOrder := []string{
 		"snapshot-volume " + project + "/" + volumeName + "/backup",
-		"copy-volume " + project + "/" + volumeName + "/backup -> bkv" + encodedId,
-		"backup-volume " + project + "/bkv" + encodedId,
-		"delete-volume " + project + "/bkv" + encodedId,
+		"backup-volume " + project + "/" + volumeName,
 		"delete-volume-snapshot " + project + "/" + volumeName + "/backup",
 	}
 	if strings.Join(p.BackupOrder, "\n") != strings.Join(wantOrder, "\n") {

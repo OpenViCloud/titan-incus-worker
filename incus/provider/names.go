@@ -78,6 +78,13 @@ func NetworkName(networkId string) string {
 	return "net-" + networkId
 }
 
+// ProjectKey keys an Incus object listed across every project by its project and name: names are unique within a
+// project only, and an operator may make one of the same name elsewhere (titan-ops features/backup/design.md#incus-backup).
+// An empty project is the key of a row from a control plane that sent no project: the object found by its name alone.
+func ProjectKey(project string, name string) string {
+	return project + "/" + name
+}
+
 // NetworkAclName is the network ACL that holds a network's firewall rules, in the network's project
 // (titan-ops features/network/design.md#firewall-on-incus).
 func NetworkAclName(networkId string) string {

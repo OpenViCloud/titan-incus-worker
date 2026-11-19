@@ -23,6 +23,7 @@ type ReconcilableVolume struct {
 	CurrentExistence            string `json:"currentExistence"`
 	CurrentAttachedExternalVmId string `json:"currentAttachedExternalVmId"`
 	CurrentAttachedElsewhere    bool   `json:"currentAttachedElsewhere"`
+	ProjectName                 string `json:"projectName"`
 }
 
 // ReconcilableVolumeSnapshot mirrors ReconcilableVolumeSnapshotQueryResult; VolumeId is the parent volume.
@@ -31,6 +32,7 @@ type ReconcilableVolumeSnapshot struct {
 	VolumeId         string `json:"volumeId"`
 	ExternalId       string `json:"externalId"`
 	CurrentExistence string `json:"currentExistence"`
+	ProjectName      string `json:"projectName"`
 }
 
 type reconcilableStorage struct {
@@ -104,8 +106,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, cp *controlplane.Client, p p
 		if err != nil {
 			continue
 		}
-		_, alreadyRead := snapshotsByVolume[parent]
-		volume, volumePresent := observed[parent]
+		key := provider.ProjectKey(row.ProjectName, parent)
+		_, alreadyRead := snapshotsByVolume[key]
+		volume, volumePresent := observed[key]
 		if alreadyRead || !volumePresent {
 			continue
 		}
@@ -114,7 +117,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cp *controlplane.Client, p p
 			logger.Warn("reading a volume's snapshots failed; skipping them this cycle", "volume", parent, "error", err)
 			continue
 		}
-		snapshotsByVolume[parent] = SnapshotNames(parent, snapshots)
+		snapshotsByVolume[key] = SnapshotNames(parent, snapshots)
 	}
 	for _, row := range rows.Snapshots {
 		report, shouldReport := DecideSnapshotReport(row, observed, snapshotsByVolume)
@@ -161,7 +164,8 @@ func instanceSet(names []string) string {
 	return strings.Join(sorted, "\n")
 }
 
-// ObserveVolumes keys the pool's custom volumes by name, with the instances using each. Instance and image volumes
+// ObserveVolumes keys the pool's custom volumes by provider.ProjectKey of their project and name, and of their name alone
+// for a row that names no project, with the instances using each. Instance and image volumes
 // share the list (lab-storage 02) and are not Titan's volumes.
 func ObserveVolumes(volumes []api.StorageVolume) map[string]observedVolume {
 	observed := map[string]observedVolume{}
@@ -169,7 +173,9 @@ func ObserveVolumes(volumes []api.StorageVolume) map[string]observedVolume {
 		if volume.Type != "custom" {
 			continue
 		}
-		observed[volume.Name] = observedVolume{project: volume.Project, instances: InstanceNames(volume.UsedBy)}
+		seen := observedVolume{project: volume.Project, instances: InstanceNames(volume.UsedBy)}
+		observed[provider.ProjectKey(volume.Project, volume.Name)] = seen
+		observed[provider.ProjectKey("", volume.Name)] = seen
 	}
 	return observed
 }
@@ -190,7 +196,7 @@ func SnapshotNames(volume string, snapshots []api.StorageVolumeSnapshot) map[str
 // DecideVolumeReport: a volume not in the pool is NotFound unless that is already recorded; otherwise only a change of
 // existence or attachment is sent.
 func DecideVolumeReport(row ReconcilableVolume, observed map[string]observedVolume) (StatusReport, bool) {
-	volume, present := observed[row.ExternalId]
+	volume, present := observed[provider.ProjectKey(row.ProjectName, row.ExternalId)]
 	if !present {
 		alreadyRecordedGone := row.CurrentExistence == existenceNotFound
 		return Observed(false, nil), !alreadyRecordedGone
@@ -221,11 +227,12 @@ func DecideSnapshotReport(row ReconcilableVolumeSnapshot, observed map[string]ob
 		return StatusReport{}, false
 	}
 	alreadyRecordedGone := row.CurrentExistence == existenceNotFound
-	_, volumePresent := observed[parent]
+	key := provider.ProjectKey(row.ProjectName, parent)
+	_, volumePresent := observed[key]
 	if !volumePresent {
 		return Observed(false, nil), !alreadyRecordedGone
 	}
-	snapshots, read := snapshotsByVolume[parent]
+	snapshots, read := snapshotsByVolume[key]
 	if !read {
 		return StatusReport{}, false
 	}

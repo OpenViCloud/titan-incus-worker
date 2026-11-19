@@ -18,6 +18,7 @@ type ReconcilableVmSnapshot struct {
 	VmId             string `json:"vmId"`
 	ExternalId       string `json:"externalId"`
 	CurrentExistence string `json:"currentExistence"`
+	ProjectName      string `json:"projectName"`
 }
 
 // The CurrentExistence words of the control plane (Titan.Domain.Values.CurrentExistence) the reconciler compares to.
@@ -60,7 +61,8 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 	return nil
 }
 
-// SnapshotsByInstance keys each instance's snapshot names by the instance name.
+// SnapshotsByInstance keys each instance's snapshot names by provider.ProjectKey of the instance's project and name, and
+// of its name alone for a row that names no project.
 func SnapshotsByInstance(instances []api.InstanceFull) map[string]map[string]bool {
 	byInstance := map[string]map[string]bool{}
 	for _, instance := range instances {
@@ -68,7 +70,8 @@ func SnapshotsByInstance(instances []api.InstanceFull) map[string]map[string]boo
 		for _, snapshot := range instance.Snapshots {
 			names[snapshot.Name] = true
 		}
-		byInstance[instance.Name] = names
+		byInstance[provider.ProjectKey(instance.Project, instance.Name)] = names
+		byInstance[provider.ProjectKey("", instance.Name)] = names
 	}
 	return byInstance
 }
@@ -80,7 +83,7 @@ func DecideReport(row ReconcilableVmSnapshot, snapshotsByInstance map[string]map
 	if err != nil {
 		return ObservationBody{}, false
 	}
-	snapshots, instancePresent := snapshotsByInstance[instance]
+	snapshots, instancePresent := snapshotsByInstance[provider.ProjectKey(row.ProjectName, instance)]
 	if !instancePresent {
 		return ObservationBody{}, false
 	}

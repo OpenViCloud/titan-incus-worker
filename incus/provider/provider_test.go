@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"io"
@@ -282,5 +283,64 @@ func TestUpdateInstance_SendsTheEtagAsIfMatch_AndAStaleOneComesBackAs412(t *test
 	defer mu.Unlock()
 	if len(ifMatch) != 1 || ifMatch[0] != "etag-of-the-read" {
 		t.Fatalf("If-Match sent: %q", ifMatch)
+	}
+}
+
+// The archive carries every snapshot of the instance or volume, and of a VM only its root disk: attached volumes have
+// backups of their own (titan-ops features/backup/design.md#incus-backup). Read off the request Incus receives.
+func TestBackups_AskForTheSnapshots_AndOfAVmOnlyItsRootDisk(t *testing.T) {
+	var mu sync.Mutex
+	bodies := map[string]map[string]any{}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		isBackup := r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/backups")
+		if isBackup {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mu.Lock()
+			bodies[r.URL.Path] = body
+			mu.Unlock()
+			w.WriteHeader(http.StatusAccepted)
+			io.WriteString(w, `{"type":"async","status":"Operation created","status_code":100,"operation":"/1.0/operations/op1","metadata":{"id":"op1","status":"Running","status_code":103}}`)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/1.0/operations/op1") {
+			io.WriteString(w, `{"type":"sync","status":"Success","status_code":200,"metadata":{"id":"op1","status":"Success","status_code":200}}`)
+			return
+		}
+		io.WriteString(w, `{"type":"sync","status":"Success","status_code":200,"metadata":{"api_extensions":["container_backup","custom_volume_backup","backup_compression_algorithm","backup_s3_upload","instance_root_only_backup","storage_volume_backup_s3_upload"],"api_status":"stable","api_version":"1.0","auth":"trusted","public":false}}`)
+	}))
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: tls.RequireAnyClientCert}
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	sum := sha256.Sum256(server.Certificate().Raw)
+	certificatePem, keyPem := clientIdentity(t)
+	connected, err := Connect(Credentials{Endpoint: server.URL, ServerFingerprint: hex.EncodeToString(sum[:]),
+		ClientCertificatePem: certificatePem, ClientKeyPem: keyPem})
+	if err != nil {
+		t.Fatal(err)
+	}
+	incus := NewIncus(connected)
+	target := api.BackupTarget{Protocol: "s3", Path: "incus/x.tar.gz"}
+
+	if err := incus.BackupInstance(context.Background(), "t-x", "vmaaaa", target); err != nil {
+		t.Fatal(err)
+	}
+	if err := incus.BackupVolume(context.Background(), "t-x", "default", "volaaaa", target); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	vm := bodies["/1.0/instances/vmaaaa/backups"]
+	volume := bodies["/1.0/storage-pools/default/volumes/custom/volaaaa/backups"]
+	if vm == nil || volume == nil {
+		t.Fatalf("backup requests seen: %v", bodies)
+	}
+	if vm["instance_only"] != false || vm["root_only"] != true {
+		t.Fatalf("vm backup request: %v", vm)
+	}
+	if volume["volume_only"] != false {
+		t.Fatalf("volume backup request: %v", volume)
 	}
 }

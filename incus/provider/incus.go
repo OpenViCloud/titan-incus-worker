@@ -29,9 +29,40 @@ func (p *Incus) GetProject(ctx context.Context, name string) (*api.Project, erro
 	return project, nil
 }
 
+func (p *Incus) ListProjects(ctx context.Context) ([]api.Project, error) {
+	projects, err := p.server.GetProjects()
+	if err != nil {
+		return nil, fmt.Errorf("list projects: %w", err)
+	}
+	return projects, nil
+}
+
+func (p *Incus) ListProfiles(ctx context.Context, project string) ([]api.Profile, error) {
+	profiles, err := p.server.UseProject(project).GetProfiles()
+	if err != nil {
+		return nil, fmt.Errorf("list profiles of project %s: %w", project, err)
+	}
+	return profiles, nil
+}
+
 func (p *Incus) CreateProject(ctx context.Context, project api.ProjectsPost) error {
 	if err := p.server.CreateProject(project); err != nil {
 		return fmt.Errorf("create project %s: %w", project.Name, err)
+	}
+	return nil
+}
+
+func (p *Incus) CreateProfile(ctx context.Context, project string, profile api.ProfilesPost) error {
+	if err := p.server.UseProject(project).CreateProfile(profile); err != nil {
+		return fmt.Errorf("create profile %s in project %s: %w", profile.Name, project, err)
+	}
+	return nil
+}
+
+// UpdateProfile writes without an ETag: a restore runs alone on a freshly reinstalled host, nobody else writing.
+func (p *Incus) UpdateProfile(ctx context.Context, project string, name string, profile api.ProfilePut) error {
+	if err := p.server.UseProject(project).UpdateProfile(name, profile, ""); err != nil {
+		return fmt.Errorf("update profile %s in project %s: %w", name, project, err)
 	}
 	return nil
 }
@@ -333,6 +364,14 @@ func (p *Incus) GetInstanceSnapshot(ctx context.Context, project string, instanc
 	return found, nil
 }
 
+func (p *Incus) ListInstanceSnapshots(ctx context.Context, project string, instance string) ([]api.InstanceSnapshot, error) {
+	snapshots, err := p.server.UseProject(project).GetInstanceSnapshots(instance)
+	if err != nil {
+		return nil, fmt.Errorf("list snapshots of instance %s in project %s: %w", instance, project, err)
+	}
+	return snapshots, nil
+}
+
 func (p *Incus) DeleteInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) error {
 	operation, err := p.server.UseProject(project).DeleteInstanceSnapshot(instance, snapshot)
 	if err != nil {
@@ -463,10 +502,10 @@ func (p *Incus) send(ctx context.Context, method string, project string, path st
 	return WaitOperation(ctx, p.server, operation.ID)
 }
 
-// BackupInstance asks for the instance alone: no snapshots, no attached volumes (each volume has its own backup).
-// Incus refuses a backup name when a target is set.
+// BackupInstance asks for the instance with every snapshot it has and its root disk only: no attached volume (each
+// volume has its own backup). Incus refuses a backup name when a target is set.
 func (p *Incus) BackupInstance(ctx context.Context, project string, name string, target api.BackupTarget) error {
-	request := api.InstanceBackupsPost{InstanceOnly: true, RootOnly: true, CompressionAlgorithm: "gzip", Target: &target}
+	request := api.InstanceBackupsPost{InstanceOnly: false, RootOnly: true, CompressionAlgorithm: "gzip", Target: &target}
 	operation, err := p.server.UseProject(project).CreateInstanceBackup(name, request)
 	if err != nil {
 		return fmt.Errorf("back up instance %s in project %s: %w", name, project, err)
@@ -478,13 +517,51 @@ func (p *Incus) BackupInstance(ctx context.Context, project string, name string,
 }
 
 func (p *Incus) BackupVolume(ctx context.Context, project string, pool string, name string, target api.BackupTarget) error {
-	request := api.StorageVolumeBackupsPost{VolumeOnly: true, CompressionAlgorithm: "gzip", Target: &target}
+	// With every snapshot of the volume.
+	request := api.StorageVolumeBackupsPost{VolumeOnly: false, CompressionAlgorithm: "gzip", Target: &target}
 	operation, err := p.server.UseProject(project).CreateStorageVolumeBackup(pool, name, request)
 	if err != nil {
 		return fmt.Errorf("back up volume %s in project %s: %w", name, project, err)
 	}
 	if err := WaitOperation(ctx, p.server, operation.Get().ID); err != nil {
 		return fmt.Errorf("back up volume %s in project %s: %w", name, project, err)
+	}
+	return nil
+}
+
+// ImportInstance streams the archive straight into Incus's own import; backupFile is read as the request body, never
+// held whole on the worker.
+func (p *Incus) ImportInstance(ctx context.Context, project string, pool string, name string, backupFile io.Reader) error {
+	args := incus.InstanceBackupArgs{BackupFile: backupFile, PoolName: pool, Name: name}
+	operation, err := p.server.UseProject(project).CreateInstanceFromBackup(args)
+	if err != nil {
+		return fmt.Errorf("import instance %s in project %s: %w", name, project, err)
+	}
+	if err := WaitOperation(ctx, p.server, operation.Get().ID); err != nil {
+		return fmt.Errorf("import instance %s in project %s: %w", name, project, err)
+	}
+	return nil
+}
+
+func (p *Incus) ImportVolume(ctx context.Context, project string, pool string, name string, backupFile io.Reader) error {
+	args := incus.StorageVolumeBackupArgs{BackupFile: backupFile, Name: name}
+	operation, err := p.server.UseProject(project).CreateStoragePoolVolumeFromBackup(pool, args)
+	if err != nil {
+		return fmt.Errorf("import volume %s in project %s: %w", name, project, err)
+	}
+	if err := WaitOperation(ctx, p.server, operation.Get().ID); err != nil {
+		return fmt.Errorf("import volume %s in project %s: %w", name, project, err)
+	}
+	return nil
+}
+
+// RestoreVolume asks Incus to put the volume back to snapshot, as the restore rolls an imported volume back to its
+// "backup" snapshot. Config is left nil: Incus only touches config during a restore when it is non-nil, and nil
+// keeps the volume's own (cmd/incusd/storage_volumes.go of v7.0.1).
+func (p *Incus) RestoreVolume(ctx context.Context, project string, pool string, name string, snapshot string) error {
+	put := api.StorageVolumePut{Restore: snapshot}
+	if err := p.send(ctx, "PUT", project, "/storage-pools/"+url.PathEscape(pool)+"/volumes/custom/"+url.PathEscape(name), put); err != nil {
+		return fmt.Errorf("restore volume %s to snapshot %s in project %s: %w", name, snapshot, project, err)
 	}
 	return nil
 }

@@ -23,15 +23,17 @@ go run .
 |---|---|---|
 | `CP_BASE_URL` | (required) | Control plane base URL |
 | `CP_INTERNAL_TOKEN` | (required) | Sent as `X-Internal-Token` on every `/internal` call |
-| `WORKER_ROLE` | `all` | Which loops this process runs: `commands` (customer commands and backups), `inventory` (reading every cluster: state and VM usage), or `all` of them. Command processes can run side by side; run one process of role `inventory` or `all`, or each cluster is read and reported once per such process |
+| `WORKER_ROLE` | `all` | Which loops this process runs: `commands` (customer commands and backups), `inventory` (reading every cluster: state and VM usage), `all` of them, or `restore` (a one-shot rebuild of one cluster from the backup bucket; runs no loop, exits 0 or 1) |
 | `COMMAND_SLOTS` | `4` | How many customer commands one process runs at once; backups run one at a time on a loop of their own. Which commands may run side by side is the control plane's lease rule |
 | `POLL_INTERVAL` | `2s` | How often each idle command slot, and the backup loop, asks for a command |
 | `RECONCILE_INTERVAL` | `2m` | How often each cluster is read from Incus |
 | `METRICS_INTERVAL` | `60s` | How often each cluster's VM usage (CPU, memory, root filesystem, disk I/O) is read from Incus and sent to the control plane |
 | `IMAGE_SERVER` | `https://images.linuxcontainers.org` | Where templates without their own image URL come from |
 | `HEALTH_ADDR` | `:8080` | `/healthz` listener |
-| `BACKUP_S3_URL`, `BACKUP_S3_BUCKET` | (none) | S3 endpoint and bucket Incus uploads `vm.backup` and `volume.backup` archives to |
-| `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY` | (none) | Key pair for that bucket, handed to Incus with each backup; with any of the four empty the worker still starts, and each backup fails naming what is missing |
+| `BACKUP_S3_URL`, `BACKUP_S3_BUCKET` | (none) | S3 endpoint and bucket Incus uploads `vm.backup` and `volume.backup` archives to, the worker writes each `cluster.backup` config to, and `WORKER_ROLE=restore` reads from |
+| `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY` | (none) | Key pair for that bucket, handed to Incus with each backup; with any of the four empty the worker still starts, and each backup (or a restore) fails naming what is missing |
+| `RESTORE_CLUSTER_ID` | (required for `WORKER_ROLE=restore`) | The cluster to rebuild |
+| `RESTORE_POINT` | (none) | A moment in `backup.TimeLayout` (`yyyyMMddTHHmmssZ`); the restore uses the newest cluster config at or before it, or the newest overall when unset |
 
 ## Layout
 
@@ -41,10 +43,10 @@ Packages are grouped by role, and imports go one way (`dependency_test.go` fails
 |---|---|
 | `main.go` | The one place that knows every package: routes each command kind and starts the loops of its `WORKER_ROLE`; backups run on a command loop of their own, so a long upload never holds a tenant's command |
 | `loop/command`, `loop/reconcile` | Lease, retry and log each command · the reconcile cycle per cluster and kind; know no resource |
-| `resource/<kind>/` | One resource each: a file per verb, its report and, for most, its reconciler · `resource/backup/` is the one exception: it backs up two resources (`vm.go`, `volume.go`), has no callback, so no report, and no reconciler · `resource/vmkeyaddition/` has a report but no reconciler: a key addition leaves nothing on Incus to observe |
+| `resource/<kind>/` | One resource each: a file per verb, its report and, for most, its reconciler · `resource/backup/` is the first exception: it backs up a VM, a volume and a cluster's config (`vm.go`, `volume.go`, `cluster.go`), has no callback, so no report, and no reconciler · `resource/restore/` rebuilds a cluster from the bucket for `WORKER_ROLE=restore`, once, with no command and no reconciler · `resource/vmkeyaddition/` has a report but no reconciler: a key addition leaves nothing on Incus to observe |
 | `incus/provider`, `incus/cluster` | The Incus port and every name Titan gives things on Incus · cluster id → connection |
 | `controlplane/` | Calls the control plane |
-| `bucket/` | Reads the backup bucket: whether a backup's object arrived |
+| `bucket/` | Reads and writes the backup bucket: whether a backup's object arrived, lists and reads objects for a restore, writes a cluster's config |
 | `testsupport/` | Test helpers shared by the packages above |
 
 `incus/provider/testdata/` holds what Incus answered in the lab (7.0.1; `lab-metrics-2026-11-10.txt` from a 7.0.2 server); the tests replay it.

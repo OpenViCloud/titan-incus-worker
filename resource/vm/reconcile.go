@@ -30,6 +30,7 @@ type ReconcilableVm struct {
 	CurrentExistence  string  `json:"currentExistence"`
 	IpAddress         string  `json:"ipAddress"`
 	PublicIpv6Address string  `json:"publicIpv6Address"`
+	ProjectName       string  `json:"projectName"`
 }
 
 // Reconcile observes one cluster's VMs and reports what differs. It never acts on Incus. A failed read skips the cycle:
@@ -46,13 +47,10 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 	if err != nil {
 		return fmt.Errorf("observe VMs of cluster %s: %w", clusterId, err)
 	}
-	byName := map[string]api.InstanceFull{}
-	for _, instance := range instances {
-		byName[instance.Name] = instance
-	}
+	byProjectAndName := InstancesByProjectAndName(instances)
 
 	for _, row := range rows {
-		report, shouldReport := DecideReport(row, byName)
+		report, shouldReport := DecideReport(row, byProjectAndName)
 		if !shouldReport {
 			continue
 		}
@@ -74,11 +72,22 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 	return nil
 }
 
+// InstancesByProjectAndName keys each instance by provider.ProjectKey of its project and name, and of its name alone for
+// a row that names no project; of two same-named instances the name alone keys one of them, as before rows named one.
+func InstancesByProjectAndName(instances []api.InstanceFull) map[string]api.InstanceFull {
+	observed := map[string]api.InstanceFull{}
+	for _, instance := range instances {
+		observed[provider.ProjectKey(instance.Project, instance.Name)] = instance
+		observed[provider.ProjectKey("", instance.Name)] = instance
+	}
+	return observed
+}
+
 // DecideReport compares one VM with Incus: a report when the status, the existence or an address differs from what
 // Titan recorded. Absent is NotFound, never Deleted: only the delete command's own report ends a VM, since a reconciler
 // pointed at the wrong cluster also finds nothing (titan-ops architecture/desired-and-current.md#reconciler-never-dies).
-func DecideReport(row ReconcilableVm, byName map[string]api.InstanceFull) (statusReport, bool) {
-	instance, present := byName[row.ExternalId]
+func DecideReport(row ReconcilableVm, instances map[string]api.InstanceFull) (statusReport, bool) {
+	instance, present := instances[provider.ProjectKey(row.ProjectName, row.ExternalId)]
 	if !present {
 		alreadyRecorded := row.CurrentExistence == existenceNotFound
 		return statusReport{Exists: false}, !alreadyRecorded

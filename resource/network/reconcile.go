@@ -6,15 +6,15 @@ import (
 	"log/slog"
 	"net/url"
 
+	"github.com/lxc/incus/v7/shared/api"
+
 	"github.com/OpenViCloud/titan-incus-worker/controlplane"
 	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 )
 
-// The CurrentExistence values DecideReport reads.
-const (
-	existenceExists   = "Exists"
-	existenceNotFound = "NotFound"
-)
+// The CurrentExistence value DecideReport reads; the others (NotFound, NotCreated) both mean Titan holds the network
+// as not on Incus.
+const existenceExists = "Exists"
 
 // ReconcilableNetwork mirrors ReconcilableNetworkQueryResult: what Titan last recorded, so only a difference is
 // reported. CurrentState is null while Titan has seen no Incus status.
@@ -23,6 +23,7 @@ type ReconcilableNetwork struct {
 	ExternalId       string  `json:"externalId"`
 	CurrentState     *string `json:"currentState"`
 	CurrentExistence string  `json:"currentExistence"`
+	ProjectName      string  `json:"projectName"`
 }
 
 // Reconcile observes one cluster's networks and reports what differs on their observation route; it never acts on Incus
@@ -39,13 +40,10 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 	if err != nil {
 		return fmt.Errorf("observe networks of cluster %s: %w", clusterId, err)
 	}
-	statusByName := map[string]string{}
-	for _, network := range networks {
-		statusByName[network.Name] = network.Status
-	}
+	statusByProjectAndName := StatusByProjectAndName(networks)
 
 	for _, row := range rows {
-		report, shouldReport := DecideReport(row, statusByName)
+		report, shouldReport := DecideReport(row, statusByProjectAndName)
 		if !shouldReport {
 			continue
 		}
@@ -68,15 +66,28 @@ func Reconcile(ctx context.Context, cp *controlplane.Client, p provider.Provider
 	return nil
 }
 
+// StatusByProjectAndName keys each network's status by provider.ProjectKey of its project and name, and of its name alone
+// for a row that names no project.
+func StatusByProjectAndName(networks []api.Network) map[string]string {
+	statuses := map[string]string{}
+	for _, network := range networks {
+		statuses[provider.ProjectKey(network.Project, network.Name)] = network.Status
+		statuses[provider.ProjectKey("", network.Name)] = network.Status
+	}
+	return statuses
+}
+
 // DecideReport compares one network with Incus: a report when the status or the existence differs from what Titan
 // recorded. The status goes as Incus spells it, whatever the word. Absent is NotFound, never Deleted: only the delete
 // command reports that, since a reconciler pointed at the wrong cluster also finds nothing
-// (titan-ops architecture/desired-and-current.md#existence-axis).
-func DecideReport(row ReconcilableNetwork, statusByName map[string]string) (ObservationBody, bool) {
-	status, present := statusByName[row.ExternalId]
+// (titan-ops architecture/desired-and-current.md#existence-axis). Absent is reported only when Titan holds the network
+// as on Incus: a network Titan holds no status for is one whose create or delete waits with nothing seen, where the
+// control plane records an absent report as nothing new, so sending it every cycle was a write that changed nothing.
+func DecideReport(row ReconcilableNetwork, statuses map[string]string) (ObservationBody, bool) {
+	status, present := statuses[provider.ProjectKey(row.ProjectName, row.ExternalId)]
 	if !present {
-		alreadyRecorded := row.CurrentExistence == existenceNotFound
-		return ObservationBody{Exists: false}, !alreadyRecorded
+		titanHoldsItOnIncus := row.CurrentExistence == existenceExists
+		return ObservationBody{Exists: false}, titanHoldsItOnIncus
 	}
 
 	recordedState := ""

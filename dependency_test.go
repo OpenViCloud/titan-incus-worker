@@ -27,6 +27,7 @@ var allowedGroupEdges = map[string][]string{
 // A resource may use another resource only through an edge named here, with its reason.
 var resourceEdgeAllowlist = map[string]string{
 	"resource/volsnapshot -> resource/volume": "a volume snapshot's callback and the snapshot list are the volume's: the storage reconciler observes both",
+	"resource/restore -> resource/backup":     "the restore reads the object keys, the backup snapshot's name and the config YAML the backup writes",
 }
 
 // Resources implement loop/command's Handler; the reconcile loop calls them, never the other way round.

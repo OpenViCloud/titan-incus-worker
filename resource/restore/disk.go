@@ -1,0 +1,205 @@
+package restore
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/lxc/incus/v7/shared/api"
+
+	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
+	"github.com/OpenViCloud/titan-incus-worker/resource/backup"
+)
+
+// restoreVolumes imports every volume Titan still lists, from the newest archive at or before atOrBefore, rolls it
+// back to the backup snapshot and removes it, then deletes any further snapshot Titan no longer lists. Volumes run
+// before VMs: a VM archive's devices name its attached volumes by their Incus name, so the volume must already exist
+// (titan-ops features/backup/design.md#cluster-restore).
+func restoreVolumes(ctx context.Context, p provider.Provider, pool string, rows []titanVolume, snapshotRows []titanVolumeSnapshot,
+	archives map[string][]archiveKey, atOrBefore time.Time, objects Objects, logger *slog.Logger, summary *Summary) {
+	liveSnapshots := liveVolumeSnapshotNamesByVolume(snapshotRows)
+	for _, row := range rows {
+		if row.ExternalId == "" {
+			continue
+		}
+		chosen, found := pickArchive(archives["volumes/"+row.Id], atOrBefore)
+		if !found {
+			logger.Warn("volume has no archive at or before the restore point; skipped", "volumeId", row.Id, "project", row.ProjectName)
+			summary.Skipped++
+			continue
+		}
+		if err := importVolume(ctx, p, pool, row.ProjectName, row.ExternalId, chosen, objects, logger); err != nil {
+			logger.Warn("restore volume failed", "volumeId", row.Id, "project", row.ProjectName, "volume", row.ExternalId,
+				"object", chosen.Key, "error", err)
+			summary.Failed++
+			continue
+		}
+		live := liveSnapshots[provider.ProjectKey(row.ProjectName, row.ExternalId)]
+		pruneVolumeSnapshots(ctx, p, pool, row.ProjectName, row.ExternalId, live, logger)
+		logger.Info("volume restored", "volumeId", row.Id, "project", row.ProjectName, "volume", row.ExternalId, "object", chosen.Key)
+		summary.Restored++
+	}
+}
+
+// importVolume streams the archive into Incus, checks it carries the backup snapshot (an archive without one is an
+// old-format archive this restore cannot use), then rolls the volume back to it and removes it.
+func importVolume(ctx context.Context, p provider.Provider, pool string, project string, name string, chosen archiveKey,
+	objects Objects, logger *slog.Logger) error {
+	body, err := objects.Get(ctx, chosen.Key)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+	if err := p.ImportVolume(ctx, project, pool, name, body); err != nil {
+		return err
+	}
+	has, err := hasVolumeSnapshot(ctx, p, pool, project, name, backup.SnapshotName)
+	if err != nil {
+		return err
+	}
+	if !has {
+		if deleteErr := p.DeleteVolume(ctx, project, pool, name); deleteErr != nil {
+			logger.Warn("removing an old-format archive's import failed; the next restore finds it there",
+				"project", project, "volume", name, "error", deleteErr)
+		}
+		return fmt.Errorf("archive %s has no %q snapshot: an old-format archive, not usable", chosen.Key, backup.SnapshotName)
+	}
+	if err := p.RestoreVolume(ctx, project, pool, name, backup.SnapshotName); err != nil {
+		return err
+	}
+	return p.DeleteVolumeSnapshot(ctx, project, pool, name, backup.SnapshotName)
+}
+
+func hasVolumeSnapshot(ctx context.Context, p provider.Provider, pool string, project string, volume string, snapshot string) (bool, error) {
+	snapshots, err := p.ListVolumeSnapshots(ctx, project, pool, volume)
+	if err != nil {
+		return false, err
+	}
+	for _, found := range snapshots {
+		_, bare, err := provider.SplitSnapshotId(found.Name)
+		if err != nil {
+			bare = found.Name
+		}
+		if bare == snapshot {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// pruneVolumeSnapshots removes every snapshot Titan no longer lists; the backup snapshot is already gone by the time
+// this runs. A failed read or delete is logged and left for a later run: it is not this archive's import that failed.
+func pruneVolumeSnapshots(ctx context.Context, p provider.Provider, pool string, project string, volume string, live map[string]bool, logger *slog.Logger) {
+	snapshots, err := p.ListVolumeSnapshots(ctx, project, pool, volume)
+	if err != nil {
+		logger.Warn("could not list volume snapshots to prune", "project", project, "volume", volume, "error", err)
+		return
+	}
+	for _, found := range snapshots {
+		_, bare, err := provider.SplitSnapshotId(found.Name)
+		if err != nil {
+			bare = found.Name
+		}
+		if bare == backup.SnapshotName || live[bare] {
+			continue
+		}
+		if err := p.DeleteVolumeSnapshot(ctx, project, pool, volume, bare); err != nil {
+			logger.Warn("deleting a volume snapshot titan no longer lists failed", "project", project, "volume", volume,
+				"snapshot", bare, "error", err)
+			continue
+		}
+		logger.Info("volume snapshot deleted: titan no longer lists it", "project", project, "volume", volume, "snapshot", bare)
+	}
+}
+
+// restoreVms imports every VM Titan still lists, rolls it back to the backup snapshot, removes extra snapshots, and
+// starts it only when Titan last recorded it Running or Ready.
+func restoreVms(ctx context.Context, p provider.Provider, pool string, rows []titanVm, snapshotRows []titanVmSnapshot,
+	archives map[string][]archiveKey, atOrBefore time.Time, objects Objects, logger *slog.Logger, summary *Summary) {
+	liveSnapshots := liveVmSnapshotNamesByInstance(snapshotRows)
+	for _, row := range rows {
+		if row.ExternalId == "" {
+			continue
+		}
+		chosen, found := pickArchive(archives["vms/"+row.Id], atOrBefore)
+		if !found {
+			logger.Warn("vm has no archive at or before the restore point; skipped", "vmId", row.Id, "project", row.ProjectName)
+			summary.Skipped++
+			continue
+		}
+		if err := importVm(ctx, p, pool, row.ProjectName, row.ExternalId, chosen, objects, logger); err != nil {
+			logger.Warn("restore vm failed", "vmId", row.Id, "project", row.ProjectName, "vm", row.ExternalId,
+				"object", chosen.Key, "error", err)
+			summary.Failed++
+			continue
+		}
+		live := liveSnapshots[provider.ProjectKey(row.ProjectName, row.ExternalId)]
+		pruneVmSnapshots(ctx, p, row.ProjectName, row.ExternalId, live, logger)
+		if shouldStart(row.CurrentState) {
+			state := api.InstanceStatePut{Action: "start"}
+			if err := p.UpdateInstanceState(ctx, row.ProjectName, row.ExternalId, state); err != nil {
+				logger.Warn("starting the restored vm failed; it stays stopped", "vmId", row.Id, "vm", row.ExternalId, "error", err)
+			} else {
+				logger.Info("vm started", "vmId", row.Id, "project", row.ProjectName, "vm", row.ExternalId)
+			}
+		}
+		logger.Info("vm restored", "vmId", row.Id, "project", row.ProjectName, "vm", row.ExternalId, "object", chosen.Key)
+		summary.Restored++
+	}
+}
+
+func shouldStart(currentState *string) bool {
+	if currentState == nil {
+		return false
+	}
+	return *currentState == "Running" || *currentState == "Ready"
+}
+
+func importVm(ctx context.Context, p provider.Provider, pool string, project string, name string, chosen archiveKey,
+	objects Objects, logger *slog.Logger) error {
+	body, err := objects.Get(ctx, chosen.Key)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+	if err := p.ImportInstance(ctx, project, pool, name, body); err != nil {
+		return err
+	}
+	_, err = p.GetInstanceSnapshot(ctx, project, name, backup.SnapshotName)
+	if provider.IsNotFound(err) {
+		if deleteErr := p.DeleteInstance(ctx, project, name); deleteErr != nil {
+			logger.Warn("removing an old-format archive's import failed; the next restore finds it there",
+				"project", project, "vm", name, "error", deleteErr)
+		}
+		return fmt.Errorf("archive %s has no %q snapshot: an old-format archive, not usable", chosen.Key, backup.SnapshotName)
+	}
+	if err != nil {
+		return err
+	}
+	// Full restore, not disk-only: the backup snapshot is the point in time Incus promises, config included, unlike
+	// vm-snapshot.revert's disk-only semantics for a tenant's own request (resource/vmsnapshot/revert.go).
+	if err := p.UpdateInstance(ctx, project, name, api.InstancePut{Restore: backup.SnapshotName}, ""); err != nil {
+		return err
+	}
+	return p.DeleteInstanceSnapshot(ctx, project, name, backup.SnapshotName)
+}
+
+func pruneVmSnapshots(ctx context.Context, p provider.Provider, project string, instance string, live map[string]bool, logger *slog.Logger) {
+	snapshots, err := p.ListInstanceSnapshots(ctx, project, instance)
+	if err != nil {
+		logger.Warn("could not list vm snapshots to prune", "project", project, "vm", instance, "error", err)
+		return
+	}
+	for _, found := range snapshots {
+		if found.Name == backup.SnapshotName || live[found.Name] {
+			continue
+		}
+		if err := p.DeleteInstanceSnapshot(ctx, project, instance, found.Name); err != nil {
+			logger.Warn("deleting a vm snapshot titan no longer lists failed", "project", project, "vm", instance,
+				"snapshot", found.Name, "error", err)
+			continue
+		}
+		logger.Info("vm snapshot deleted: titan no longer lists it", "project", project, "vm", instance, "snapshot", found.Name)
+	}
+}

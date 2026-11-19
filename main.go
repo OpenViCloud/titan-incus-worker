@@ -25,6 +25,7 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/resource/firewall"
 	"github.com/OpenViCloud/titan-incus-worker/resource/loadbalancer"
 	"github.com/OpenViCloud/titan-incus-worker/resource/network"
+	"github.com/OpenViCloud/titan-incus-worker/resource/restore"
 	"github.com/OpenViCloud/titan-incus-worker/resource/template"
 	"github.com/OpenViCloud/titan-incus-worker/resource/vm"
 	"github.com/OpenViCloud/titan-incus-worker/resource/vmkeyaddition"
@@ -48,8 +49,8 @@ const (
 )
 
 // backupKinds run on a loop of their own: one backup holds its loop for as long as the upload takes, and a tenant's
-// create or delete must not wait behind it.
-var backupKinds = []string{"vm.backup", "volume.backup"}
+// create or delete must not wait behind it. A cluster's config is asked after the day's disks and waits behind them.
+var backupKinds = []string{"vm.backup", "volume.backup", "cluster.backup"}
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil)).With("worker", hostnameOrUnknown())
@@ -64,6 +65,15 @@ func main() {
 
 	cp := controlplane.New(loaded.cpBaseUrl, loaded.cpInternalToken)
 	clusters := cluster.NewResolver(cp, cluster.ConnectIncus, logger)
+
+	if loaded.role == roleRestore {
+		// An archive import is one request as long as the upload of a whole disk.
+		restoreClusters := cluster.NewResolver(cp, cluster.ConnectIncusWithoutRequestTimeout, logger)
+		code := runRestore(ctx, cp, restoreClusters, loaded, logger)
+		stop()
+		os.Exit(code)
+	}
+
 	tenantRoutes, backupRoutes := splitBackupRoutes(routes(cp, clusters, loaded.imageServer, loaded.backupTarget))
 	running := loops{
 		commands:   command.NewPool(cp, tenantRoutes, loaded.pollInterval, loaded.commandSlots, logger),
@@ -99,6 +109,25 @@ func main() {
 	stopped.Wait()
 }
 
+// runRestore runs WORKER_ROLE=restore once and returns the process exit code: 0 on success, 1 on any failure
+// (titan-ops features/backup/design.md#cluster-restore). It needs the backup bucket, unlike every other role, so it
+// checks the target itself instead of only warning as the backup loop does.
+func runRestore(ctx context.Context, cp *controlplane.Client, clusters cluster.Clusters, loaded config, logger *slog.Logger) int {
+	logger = logger.With("role", roleRestore)
+	if missing := loaded.backupTarget.Missing(); len(missing) > 0 {
+		logger.Error("no backup target: a restore needs the bucket", "missing", missing)
+		return 1
+	}
+	objects := bucket.New(loaded.backupTarget.Url, loaded.backupTarget.Bucket, loaded.backupTarget.AccessKeyId, loaded.backupTarget.SecretAccessKey)
+	summary, err := restore.New(cp, clusters, objects).Run(ctx, loaded.restoreClusterId, loaded.restorePoint, logger)
+	if err != nil {
+		logger.Error("restore failed", "clusterId", loaded.restoreClusterId, "restored", summary.Restored,
+			"skipped", summary.Skipped, "failed", summary.Failed, "error", err)
+		return 1
+	}
+	return 0
+}
+
 func routes(cp *controlplane.Client, clusters cluster.Clusters, imageServer string, target backup.Target) map[string]command.Route {
 	objects := bucket.New(target.Url, target.Bucket, target.AccessKeyId, target.SecretAccessKey)
 	return map[string]command.Route{
@@ -130,6 +159,8 @@ func routes(cp *controlplane.Client, clusters cluster.Clusters, imageServer stri
 
 		"vm.backup":     {Handler: backup.NewVm(clusters, target, objects), Timeout: backupTimeout},
 		"volume.backup": {Handler: backup.NewVolume(clusters, target, objects), Timeout: backupTimeout},
+		// A few reads of the Incus API and one small object.
+		"cluster.backup": {Handler: backup.NewCluster(clusters, target, objects), Timeout: networkCommandTimeout},
 	}
 }
 

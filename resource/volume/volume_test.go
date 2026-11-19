@@ -12,6 +12,7 @@ import (
 	"github.com/lxc/incus/v7/shared/api"
 
 	"github.com/OpenViCloud/titan-incus-worker/incus/cluster"
+	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 	"github.com/OpenViCloud/titan-incus-worker/loop/command"
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
@@ -421,7 +422,7 @@ func TestDecideVolumeReport(t *testing.T) {
 
 func TestDecideSnapshotReport(t *testing.T) {
 	observed := ObserveVolumes([]api.StorageVolume{{Name: "vola", Type: "custom", Project: project}, {Name: "volunread", Type: "custom", Project: project}})
-	read := map[string]map[string]bool{"vola": {"sone": true}}
+	read := map[string]map[string]bool{provider.ProjectKey("", "vola"): {"sone": true}}
 	cases := []struct {
 		name      string
 		row       ReconcilableVolumeSnapshot
@@ -533,5 +534,33 @@ func TestReconcile_FailedPoolRead_ReportsNothing(t *testing.T) {
 
 	if err == nil || len(cp.RequestsTo("PATCH")) != 0 {
 		t.Fatalf("err %v, reports %+v", err, cp.RequestsTo("PATCH"))
+	}
+}
+
+// A volume of the same name in another project is not this one, nor are its snapshots
+// (titan-ops features/backup/design.md#incus-backup).
+func TestDecide_FindsTheVolumeAndItsSnapshotsInItsTenantsProject_NotASameNamedOneElsewhere(t *testing.T) {
+	observed := ObserveVolumes([]api.StorageVolume{
+		{Name: "vola", Type: "custom", Project: "t-a", UsedBy: []string{"/1.0/instances/vmone?project=t-a"}},
+		{Name: "vola", Type: "custom", Project: "t-b"},
+	})
+	read := map[string]map[string]bool{provider.ProjectKey("t-a", "vola"): {"sone": true}, provider.ProjectKey("t-b", "vola"): {}}
+
+	_, sendVolume := DecideVolumeReport(ReconcilableVolume{ExternalId: "vola", ProjectName: "t-a", CurrentExistence: "Exists",
+		CurrentAttachedExternalVmId: "vmone"}, observed)
+	lost, sendLost := DecideVolumeReport(ReconcilableVolume{ExternalId: "vola", ProjectName: "t-c", CurrentExistence: "Exists"}, observed)
+	_, sendSnapshot := DecideSnapshotReport(ReconcilableVolumeSnapshot{ExternalId: "vola/sone", ProjectName: "t-a",
+		CurrentExistence: "Exists"}, observed, read)
+	gone, sendGone := DecideSnapshotReport(ReconcilableVolumeSnapshot{ExternalId: "vola/sone", ProjectName: "t-b",
+		CurrentExistence: "Exists"}, observed, read)
+
+	if sendVolume || sendSnapshot {
+		t.Fatalf("the volume in t-a and its snapshot are as recorded: nothing to send (volume %v, snapshot %v)", sendVolume, sendSnapshot)
+	}
+	if !sendLost || lost.Exists {
+		t.Fatalf("no vola in t-c: want NotFound sent, got %+v sent=%v", lost, sendLost)
+	}
+	if !sendGone || gone.Exists {
+		t.Fatalf("the vola of t-b has no sone: want NotFound sent, got %+v sent=%v", gone, sendGone)
 	}
 }
