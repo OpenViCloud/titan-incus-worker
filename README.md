@@ -30,7 +30,7 @@ go run .
 | `METRICS_INTERVAL` | `60s` | How often each cluster's VM usage (CPU, memory, root filesystem, disk I/O) is read from Incus and sent to the control plane |
 | `IMAGE_SERVER` | `https://images.linuxcontainers.org` | Where templates without their own image URL come from |
 | `HEALTH_ADDR` | `:8080` | `/healthz` listener |
-| `BACKUP_S3_URL`, `BACKUP_S3_BUCKET` | (none) | S3 endpoint and bucket Incus uploads `vm.backup` and `volume.backup` archives to, and `WORKER_ROLE=restore` reads from |
+| `BACKUP_S3_URL`, `BACKUP_S3_BUCKET` | (none) | S3 endpoint and bucket Incus uploads `vm.backup` and `volume.backup` archives to, the worker writes each `cluster.backup` config to, and `WORKER_ROLE=restore` reads from |
 | `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY` | (none) | Key pair for that bucket, handed to Incus with each backup; with any of the four empty the worker still starts, and each backup (or a restore) fails naming what is missing |
 | `RESTORE_CLUSTER_ID` | (required for `WORKER_ROLE=restore`) | The cluster to rebuild |
 | `RESTORE_POINT` | (none) | A moment in `backup.TimeLayout` (`yyyyMMddTHHmmssZ`); the restore uses the newest cluster config at or before it, or the newest overall when unset |
