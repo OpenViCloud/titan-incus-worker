@@ -30,11 +30,12 @@ func ipv6(address string, scope string) api.InstanceStateNetworkAddress {
 }
 
 func byName(instances ...api.InstanceFull) map[string]api.InstanceFull {
-	indexed := map[string]api.InstanceFull{}
-	for _, instance := range instances {
-		indexed[instance.Name] = instance
-	}
-	return indexed
+	return InstancesByProjectAndName(instances)
+}
+
+func inProject(instance api.InstanceFull, project string) api.InstanceFull {
+	instance.Project = project
+	return instance
 }
 
 func TestDecideReport_Running_CarriesTheFirstGlobalIpv4_SkippingLoopback(t *testing.T) {
@@ -315,5 +316,37 @@ func TestReconcile_AnInstanceIncusDoesNotHave_IsObservedAbsent_OnTheObservationR
 	}
 	if len(cp.RequestsTo("PATCH ")) != 1 {
 		t.Fatalf("want the observation alone, got %+v", cp.Requests())
+	}
+}
+
+// An instance of the same name in another project is not this VM: an operator's import beside the tenant's VM must not
+// stand in for it (titan-ops features/backup/design.md#incus-backup).
+func TestDecideReport_FindsTheVmInItsTenantsProject_NotASameNamedOneElsewhere(t *testing.T) {
+	stopped := inProject(running("vm-a", nil), "t-b")
+	stopped.Status = "Stopped"
+	observed := byName(inProject(running("vm-a", nil), "t-a"), stopped)
+	recorded := "Running"
+	row := ReconcilableVm{Id: "a", ExternalId: "vm-a", ProjectName: "t-a", CurrentState: &recorded, CurrentExistence: "Exists"}
+
+	_, send := DecideReport(row, observed)
+	lost, sendLost := DecideReport(ReconcilableVm{Id: "c", ExternalId: "vm-a", ProjectName: "t-c", CurrentExistence: "Exists"}, observed)
+
+	if send {
+		t.Fatal("the VM in its own project is Running as recorded: nothing to send")
+	}
+	if !sendLost || lost.Exists {
+		t.Fatalf("no vm-a in t-c: want NotFound sent, got %+v sent=%v", lost, sendLost)
+	}
+}
+
+// A control plane from before the rows named the project sends none: the VM is found by its name alone, as before.
+func TestDecideReport_ARowWithoutProject_FindsTheVmByNameAlone(t *testing.T) {
+	recorded := "Running"
+	row := ReconcilableVm{Id: "a", ExternalId: "vm-a", CurrentState: &recorded, CurrentExistence: "Exists"}
+
+	_, send := DecideReport(row, byName(inProject(running("vm-a", nil), "t-a")))
+
+	if send {
+		t.Fatal("found by name and Running as recorded: nothing to send")
 	}
 }

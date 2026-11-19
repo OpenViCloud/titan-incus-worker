@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/lxc/incus/v7/shared/api"
-
 	"github.com/OpenViCloud/titan-incus-worker/incus/cluster"
 	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 	"github.com/OpenViCloud/titan-incus-worker/loop/command"
@@ -21,9 +19,12 @@ type vmPayload struct {
 	TenantId     string `json:"tenantId"`
 }
 
-// Vm runs vm.backup. On an LVM pool Incus reads a running VM's disk as it is being written, so the backup is of a
-// stopped copy of a snapshot: one point in time, as after a power cut. Attached volumes are not in it; each has its own
-// volume.backup. The command is done when the archive is in the bucket; there is no callback.
+// Vm runs vm.backup: Incus uploads an archive of the VM itself with every snapshot it has, taken right after a snapshot
+// named backup. On an LVM pool Incus reads the running disk as it is being written; the restore rolls back to that
+// snapshot, so what comes back is one point in time, as after a power cut. Attached volumes are not in it; each has its
+// own volume.backup. Every other command of the VM waits while this one runs, so no snapshot is taken or deleted halfway
+// through the export (titan-ops features/backup/design.md#incus-backup). The command is done when the archive is in the
+// bucket; there is no callback.
 type Vm struct {
 	clusters cluster.Clusters
 	target   Target
@@ -66,14 +67,13 @@ func (h *Vm) Run(ctx context.Context, leased command.Leased, logger *slog.Logger
 		return err
 	}
 
-	if err := p.CreateInstanceSnapshot(ctx, project, instance, snapshotName); err != nil {
+	if err := p.CreateInstanceSnapshot(ctx, project, instance, SnapshotName); err != nil {
 		return err
 	}
 	key := ObjectKey(leased.ClusterId, payload.TenantId, "vms", payload.VmId, h.now())
-	runErr := copyAndUpload(ctx, p, project, instance, copyName, h.target.upload(key))
+	runErr := p.BackupInstance(ctx, project, instance, h.target.upload(key))
 	cleanUp(logger,
-		func(ctx context.Context) error { return deleteInstanceIfThere(ctx, p, project, copyName) },
-		func(ctx context.Context) error { return p.DeleteInstanceSnapshot(ctx, project, instance, snapshotName) },
+		func(ctx context.Context) error { return p.DeleteInstanceSnapshot(ctx, project, instance, SnapshotName) },
 	)
 	if runErr != nil {
 		return runErr
@@ -83,39 +83,6 @@ func (h *Vm) Run(ctx context.Context, leased command.Leased, logger *slog.Logger
 	}
 	logger.Info("backup uploaded", "object", key)
 	return nil
-}
-
-func copyAndUpload(ctx context.Context, p provider.Provider, project string, instance string, copyName string,
-	upload api.BackupTarget) error {
-	snapshot, err := p.GetInstanceSnapshot(ctx, project, instance, snapshotName)
-	if err != nil {
-		return err
-	}
-	copyRequest := api.InstancesPost{
-		InstancePut: api.InstancePut{Devices: volumesMasked(snapshot.Devices)},
-		Name:        copyName,
-		Type:        api.InstanceTypeVM,
-		Source:      api.InstanceSource{Type: "copy", Source: provider.SnapshotId(instance, snapshotName)},
-	}
-	if err := p.CreateInstance(ctx, project, copyRequest); err != nil {
-		return err
-	}
-	return p.BackupInstance(ctx, project, copyName, upload)
-}
-
-// volumesMasked names each custom volume the snapshot has attached, as a device of type none: a copy takes the
-// source's devices except those its request names, so the copy holds no volume (a volume has its own backup). The
-// archive then declares the volume as type none under its name; a restore attaches it again
-// (titan-ops features/backup/design.md#incus-backup).
-func volumesMasked(devices map[string]map[string]string) map[string]map[string]string {
-	masked := map[string]map[string]string{}
-	for name, settings := range devices {
-		isVolume := settings["type"] == "disk" && settings["source"] != ""
-		if isVolume {
-			masked[name] = map[string]string{"type": "none"}
-		}
-	}
-	return masked
 }
 
 // GiveUp removes what a run left; the command has no callback.
@@ -138,18 +105,20 @@ func (h *Vm) GiveUp(ctx context.Context, leased command.Leased, cause error, log
 	return nil
 }
 
+// removeVmLeftovers removes the backup snapshot a run that died left, and the copy that a worker from before the archive
+// carried snapshots made (titan-ops features/backup/design.md#incus-backup).
 func removeVmLeftovers(ctx context.Context, p provider.Provider, project string, instance string, copyName string) error {
 	if err := deleteInstanceIfThere(ctx, p, project, copyName); err != nil {
 		return err
 	}
-	_, err := p.GetInstanceSnapshot(ctx, project, instance, snapshotName)
+	_, err := p.GetInstanceSnapshot(ctx, project, instance, SnapshotName)
 	if provider.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	return p.DeleteInstanceSnapshot(ctx, project, instance, snapshotName)
+	return p.DeleteInstanceSnapshot(ctx, project, instance, SnapshotName)
 }
 
 func deleteInstanceIfThere(ctx context.Context, p provider.Provider, project string, name string) error {

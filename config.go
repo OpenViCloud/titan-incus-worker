@@ -21,15 +21,21 @@ type config struct {
 	backupTarget      backup.Target
 	role              role
 	commandSlots      int
+	// restoreClusterId and restorePoint are read only for roleRestore (titan-ops features/backup/design.md#cluster-restore).
+	// restorePoint is "" for the newest config object; otherwise a backup.TimeLayout moment, the newest at or before it.
+	restoreClusterId string
+	restorePoint     string
 }
 
-// role is which loops one worker process runs (titan-ops architecture/worker-structure.md#worker-roles).
+// role is which loops one worker process runs (titan-ops architecture/worker-structure.md#worker-roles). roleRestore
+// runs the one-shot restore instead of any loop.
 type role string
 
 const (
 	roleAll       role = "all"
 	roleCommands  role = "commands"
 	roleInventory role = "inventory"
+	roleRestore   role = "restore"
 )
 
 // loadConfig reads the environment; lookup is os.Getenv outside tests.
@@ -72,16 +78,28 @@ func loadConfig(lookup func(string) string) (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	if loaded.role == roleRestore {
+		loaded.restoreClusterId = lookup("RESTORE_CLUSTER_ID")
+		if loaded.restoreClusterId == "" {
+			return config{}, errors.New("WORKER_ROLE=restore needs RESTORE_CLUSTER_ID")
+		}
+		loaded.restorePoint = lookup("RESTORE_POINT")
+		if loaded.restorePoint != "" {
+			if _, err := time.Parse(backup.TimeLayout, loaded.restorePoint); err != nil {
+				return config{}, fmt.Errorf("RESTORE_POINT %q is not %s: %w", loaded.restorePoint, backup.TimeLayout, err)
+			}
+		}
+	}
 	return loaded, nil
 }
 
 func roleOf(raw string) (role, error) {
-	for _, known := range []role{roleAll, roleCommands, roleInventory} {
+	for _, known := range []role{roleAll, roleCommands, roleInventory, roleRestore} {
 		if raw == string(known) {
 			return known, nil
 		}
 	}
-	return "", fmt.Errorf("WORKER_ROLE must be %s, %s or %s, got %q", roleAll, roleCommands, roleInventory, raw)
+	return "", fmt.Errorf("WORKER_ROLE must be %s, %s, %s or %s, got %q", roleAll, roleCommands, roleInventory, roleRestore, raw)
 }
 
 func positiveIntOr(lookup func(string) string, key string, fallback int) (int, error) {

@@ -11,6 +11,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +20,30 @@ import (
 
 	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 )
+
+// ArchiveDescription is what a test writes as the whole content of a fake backup archive: one line per snapshot the
+// archive carries ("backup" among them for a well-formed one, absent for an old-format archive). ImportInstance and
+// ImportVolume read it instead of unpacking a real tar.gz, so a test describes an archive's snapshots without building
+// one. A blank line is ignored, so a trailing newline is harmless.
+type ArchiveDescription struct {
+	Snapshots []string
+}
+
+// ArchiveBody is the fake archive body a test gives a fake bucket object: ImportInstance/ImportVolume parse it back.
+func ArchiveBody(snapshots ...string) string {
+	return strings.Join(snapshots, "\n")
+}
+
+func parseArchiveDescription(body string) ArchiveDescription {
+	description := ArchiveDescription{}
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			description.Snapshots = append(description.Snapshots, trimmed)
+		}
+	}
+	return description
+}
 
 // Provider is an in-memory provider.Provider. Errors set on it are returned by the matching call; every call is
 // counted in Calls.
@@ -29,7 +54,9 @@ type Provider struct {
 	// Order names each network and network ACL create/delete in call order, e.g. "create-acl p/acl-x".
 	Order []string
 
-	Projects        map[string]bool
+	Projects map[string]bool
+	// Profiles is keyed by project.
+	Profiles        map[string][]api.Profile
 	CreatedProjects []api.ProjectsPost
 
 	Instances         map[string]*api.Instance // key: project + "/" + name
@@ -101,12 +128,13 @@ type Provider struct {
 	// SnapshotDevices holds the instance's devices at the time of each snapshot, under the same key.
 	SnapshotDevices map[string]map[string]map[string]string
 	// Copies holds each instance a copy made, with its devices, as it was when made.
-	Copies            []api.Instance
-	CreateSnapshotErr error
-	GetSnapshotErr    error
-	DeleteSnapshotErr error
-	Volumes           map[string]*api.StorageVolume // key: project + "/" + name
-	GetVolumeErr      error
+	Copies                   []api.Instance
+	CreateSnapshotErr        error
+	GetSnapshotErr           error
+	DeleteSnapshotErr        error
+	ListInstanceSnapshotsErr error
+	Volumes                  map[string]*api.StorageVolume // key: project + "/" + name
+	GetVolumeErr             error
 	// AfterUpdateInstance runs after each recorded UpdateInstance: a test makes the fake follow what Incus would
 	// change, such as a volume's used_by once its disk device is gone.
 	AfterUpdateInstance func()
@@ -146,6 +174,23 @@ type Provider struct {
 	InstanceBackups []InstanceBackup
 	VolumeBackups   []VolumeBackup
 	BackupErr       error
+	// CreatedProfiles/UpdatedProfiles, keyed by project + "/" + name for the update, record a restore rebuilding a
+	// project's profiles.
+	CreatedProfiles  []api.ProfilesPost
+	CreateProfileErr error
+	UpdatedProfiles  []ProfileUpdate
+	UpdateProfileErr error
+	// ImportedInstances/ImportedVolumes record each ImportInstance/ImportVolume call, archive body included so a test
+	// tells which archive was used. ImportInstance/ImportVolume decode the body as testsupport.ArchiveDescription
+	// (see parseArchiveDescription) and create the instance/volume with the snapshots it names, as Incus's own import
+	// would from a real tar.gz.
+	ImportedInstances []InstanceImport
+	ImportInstanceErr error
+	ImportedVolumes   []VolumeImport
+	ImportVolumeErr   error
+	// RestoredVolumes names each RestoreVolume call, "project/volume/snapshot".
+	RestoredVolumes  []string
+	RestoreVolumeErr error
 	// Metrics is the OpenMetrics text GetMetrics answers, unless GetMetricsErr is set.
 	Metrics       string
 	GetMetricsErr error
@@ -164,9 +209,30 @@ type VolumeBackup struct {
 	Target  api.BackupTarget
 }
 
+type ProfileUpdate struct {
+	Project string
+	Name    string
+	Profile api.ProfilePut
+}
+
+type InstanceImport struct {
+	Project string
+	Pool    string
+	Name    string
+	Body    string
+}
+
+type VolumeImport struct {
+	Project string
+	Pool    string
+	Name    string
+	Body    string
+}
+
 func NewProvider() *Provider {
 	return &Provider{
 		Projects:           map[string]bool{},
+		Profiles:           map[string][]api.Profile{},
 		Instances:          map[string]*api.Instance{},
 		InstanceFiles:      map[string][]byte{},
 		InstanceSnapshots:  map[string]bool{},
@@ -204,6 +270,49 @@ func (p *Provider) GetProject(ctx context.Context, name string) (*api.Project, e
 		return nil, NotFound("Project not found")
 	}
 	return &api.Project{Name: name}, nil
+}
+
+func (p *Provider) ListProjects(ctx context.Context) ([]api.Project, error) {
+	p.count()
+	names := []string{}
+	for name := range p.Projects {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	projects := []api.Project{}
+	for _, name := range names {
+		projects = append(projects, api.Project{Name: name})
+	}
+	return projects, nil
+}
+
+func (p *Provider) ListProfiles(ctx context.Context, project string) ([]api.Profile, error) {
+	p.count()
+	return p.Profiles[project], nil
+}
+
+func (p *Provider) CreateProfile(ctx context.Context, project string, profile api.ProfilesPost) error {
+	p.count()
+	p.CreatedProfiles = append(p.CreatedProfiles, profile)
+	if p.CreateProfileErr != nil {
+		return p.CreateProfileErr
+	}
+	p.Profiles[project] = append(p.Profiles[project], api.Profile{Name: profile.Name, ProfilePut: profile.ProfilePut})
+	return nil
+}
+
+func (p *Provider) UpdateProfile(ctx context.Context, project string, name string, profile api.ProfilePut) error {
+	p.count()
+	p.UpdatedProfiles = append(p.UpdatedProfiles, ProfileUpdate{Project: project, Name: name, Profile: profile})
+	if p.UpdateProfileErr != nil {
+		return p.UpdateProfileErr
+	}
+	for i := range p.Profiles[project] {
+		if p.Profiles[project][i].Name == name {
+			p.Profiles[project][i].ProfilePut = profile
+		}
+	}
+	return nil
 }
 
 func (p *Provider) CreateProject(ctx context.Context, project api.ProjectsPost) error {
@@ -663,6 +772,24 @@ func (p *Provider) GetInstanceSnapshot(ctx context.Context, project string, inst
 	return &api.InstanceSnapshot{Name: snapshot, Devices: p.SnapshotDevices[key]}, nil
 }
 
+// ListInstanceSnapshots names each snapshot bare, as Incus does for instance snapshots (unlike a volume's, which Incus
+// names "<volume>/<snapshot>").
+func (p *Provider) ListInstanceSnapshots(ctx context.Context, project string, instance string) ([]api.InstanceSnapshot, error) {
+	p.count()
+	if p.ListInstanceSnapshotsErr != nil {
+		return nil, p.ListInstanceSnapshotsErr
+	}
+	prefix := project + "/" + instance + "/"
+	snapshots := []api.InstanceSnapshot{}
+	for key := range p.InstanceSnapshots {
+		if strings.HasPrefix(key, prefix) {
+			name := strings.TrimPrefix(key, prefix)
+			snapshots = append(snapshots, api.InstanceSnapshot{Name: name, Devices: p.SnapshotDevices[key]})
+		}
+	}
+	return snapshots, nil
+}
+
 func (p *Provider) DeleteInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) error {
 	p.count()
 	if p.DeleteSnapshotErr != nil {
@@ -895,4 +1022,50 @@ func (p *Provider) BackupVolume(ctx context.Context, project string, pool string
 	}
 	p.VolumeBackups = append(p.VolumeBackups, VolumeBackup{Project: project, Pool: pool, Name: name, Target: target})
 	return nil
+}
+
+// ImportInstance reads backupFile whole (a test's fake archive, never a real tar.gz) and decodes it as
+// testsupport.ArchiveDescription, then creates the instance with the snapshots it names, as Incus's own import would.
+func (p *Provider) ImportInstance(ctx context.Context, project string, pool string, name string, backupFile io.Reader) error {
+	p.count()
+	body, err := io.ReadAll(backupFile)
+	if err != nil {
+		return err
+	}
+	p.ImportedInstances = append(p.ImportedInstances, InstanceImport{Project: project, Pool: pool, Name: name, Body: string(body)})
+	if p.ImportInstanceErr != nil {
+		return p.ImportInstanceErr
+	}
+	description := parseArchiveDescription(string(body))
+	key := project + "/" + name
+	p.Instances[key] = &api.Instance{Name: name, StatusCode: api.Stopped}
+	for _, snapshot := range description.Snapshots {
+		p.InstanceSnapshots[key+"/"+snapshot] = true
+		p.SnapshotDevices[key+"/"+snapshot] = map[string]map[string]string{}
+	}
+	return nil
+}
+
+func (p *Provider) ImportVolume(ctx context.Context, project string, pool string, name string, backupFile io.Reader) error {
+	p.count()
+	body, err := io.ReadAll(backupFile)
+	if err != nil {
+		return err
+	}
+	p.ImportedVolumes = append(p.ImportedVolumes, VolumeImport{Project: project, Pool: pool, Name: name, Body: string(body)})
+	if p.ImportVolumeErr != nil {
+		return p.ImportVolumeErr
+	}
+	description := parseArchiveDescription(string(body))
+	p.Volumes[project+"/"+name] = &api.StorageVolume{Name: name, Type: "custom", Project: project}
+	for _, snapshot := range description.Snapshots {
+		p.VolumeSnapshots[project+"/"+name+"/"+snapshot] = true
+	}
+	return nil
+}
+
+func (p *Provider) RestoreVolume(ctx context.Context, project string, pool string, name string, snapshot string) error {
+	p.count()
+	p.RestoredVolumes = append(p.RestoredVolumes, project+"/"+name+"/"+snapshot)
+	return p.RestoreVolumeErr
 }

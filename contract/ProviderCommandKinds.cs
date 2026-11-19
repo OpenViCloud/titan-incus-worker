@@ -28,6 +28,9 @@ public static class ProviderCommandKinds
     public const string TemplateSync = "template.sync";
     public const string VmBackup = "vm.backup";
     public const string VolumeBackup = "volume.backup";
+    /// The day's config of one cluster, of no tenant and no resource; the worker's backup loop leases it with the two
+    /// above, and its row of no tenant is a lane of its own whatever side it is on (titan-ops features/backup/design.md#cluster-backup).
+    public const string ClusterBackup = "cluster.backup";
 
     /// The kinds the worker leases on a loop of their own; a tenant's backup and its other commands are two lanes
     /// (titan-ops features/provider/design.md#tenant-lane).

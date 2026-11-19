@@ -135,7 +135,7 @@ func TestBackupKinds_HaveALoopOfTheirOwn(t *testing.T) {
 		names = append(names, kind)
 	}
 	sort.Strings(names)
-	if strings.Join(names, ",") != "vm.backup,volume.backup" {
+	if strings.Join(names, ",") != "cluster.backup,vm.backup,volume.backup" {
 		t.Fatalf("backup loop: %v", names)
 	}
 	for kind := range tenant {
@@ -188,5 +188,45 @@ func TestLoadConfig_UnknownRoleOrBadSlots_Fails(t *testing.T) {
 		if _, err := loadConfig(lookupFrom(values)); err == nil {
 			t.Errorf("%v: started", values)
 		}
+	}
+}
+
+func TestLoadConfig_Restore_NeedsTheClusterId(t *testing.T) {
+	_, err := loadConfig(lookupFrom(map[string]string{"CP_BASE_URL": "http://cp", "CP_INTERNAL_TOKEN": "t", "WORKER_ROLE": "restore"}))
+
+	if err == nil {
+		t.Fatal("started a restore without RESTORE_CLUSTER_ID")
+	}
+}
+
+func TestLoadConfig_Restore_ReadsTheClusterIdAndPoint(t *testing.T) {
+	loaded, err := loadConfig(lookupFrom(map[string]string{
+		"CP_BASE_URL": "http://cp", "CP_INTERNAL_TOKEN": "t", "WORKER_ROLE": "restore",
+		"RESTORE_CLUSTER_ID": "c1", "RESTORE_POINT": "20261118T120000Z",
+	}))
+
+	if err != nil || loaded.role != roleRestore || loaded.restoreClusterId != "c1" || loaded.restorePoint != "20261118T120000Z" {
+		t.Fatalf("err %v, loaded %+v", err, loaded)
+	}
+}
+
+func TestLoadConfig_Restore_WithoutAPoint_IsFine(t *testing.T) {
+	loaded, err := loadConfig(lookupFrom(map[string]string{
+		"CP_BASE_URL": "http://cp", "CP_INTERNAL_TOKEN": "t", "WORKER_ROLE": "restore", "RESTORE_CLUSTER_ID": "c1",
+	}))
+
+	if err != nil || loaded.restorePoint != "" {
+		t.Fatalf("err %v, point %q", err, loaded.restorePoint)
+	}
+}
+
+func TestLoadConfig_Restore_BadPoint_Fails(t *testing.T) {
+	_, err := loadConfig(lookupFrom(map[string]string{
+		"CP_BASE_URL": "http://cp", "CP_INTERNAL_TOKEN": "t", "WORKER_ROLE": "restore",
+		"RESTORE_CLUSTER_ID": "c1", "RESTORE_POINT": "2026-11-18",
+	}))
+
+	if err == nil {
+		t.Fatal("accepted a RESTORE_POINT not in backup.TimeLayout")
 	}
 }

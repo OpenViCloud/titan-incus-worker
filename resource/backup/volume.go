@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/lxc/incus/v7/shared/api"
-
 	"github.com/OpenViCloud/titan-incus-worker/incus/cluster"
 	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 	"github.com/OpenViCloud/titan-incus-worker/loop/command"
@@ -21,7 +19,8 @@ type volumePayload struct {
 	TenantId         string `json:"tenantId"`
 }
 
-// Volume runs volume.backup the way Vm does: a copy of a snapshot is what Incus uploads, then both go.
+// Volume runs volume.backup the way Vm does: Incus uploads the volume itself with its snapshots, right after a snapshot
+// named backup that the restore rolls back to.
 type Volume struct {
 	clusters cluster.Clusters
 	target   Target
@@ -65,15 +64,14 @@ func (h *Volume) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 		return err
 	}
 
-	if err := p.CreateVolumeSnapshot(ctx, project, pool, volume, snapshotName); err != nil {
+	if err := p.CreateVolumeSnapshot(ctx, project, pool, volume, SnapshotName); err != nil {
 		return err
 	}
 	key := ObjectKey(leased.ClusterId, payload.TenantId, "volumes", payload.VolumeId, h.now())
-	runErr := copyAndUploadVolume(ctx, p, project, pool, volume, copyName, h.target.upload(key))
+	runErr := p.BackupVolume(ctx, project, pool, volume, h.target.upload(key))
 	cleanUp(logger,
-		func(ctx context.Context) error { return deleteVolumeIfThere(ctx, p, project, pool, copyName) },
 		func(ctx context.Context) error {
-			return p.DeleteVolumeSnapshot(ctx, project, pool, volume, snapshotName)
+			return p.DeleteVolumeSnapshot(ctx, project, pool, volume, SnapshotName)
 		},
 	)
 	if runErr != nil {
@@ -84,20 +82,6 @@ func (h *Volume) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	}
 	logger.Info("backup uploaded", "object", key)
 	return nil
-}
-
-func copyAndUploadVolume(ctx context.Context, p provider.Provider, project string, pool string, volume string,
-	copyName string, upload api.BackupTarget) error {
-	copyRequest := api.StorageVolumesPost{
-		Name:        copyName,
-		Type:        "custom",
-		ContentType: "block",
-		Source:      api.StorageVolumeSource{Type: "copy", Pool: pool, Name: provider.SnapshotId(volume, snapshotName)},
-	}
-	if err := p.CreateVolume(ctx, project, pool, copyRequest); err != nil {
-		return err
-	}
-	return p.BackupVolume(ctx, project, pool, copyName, upload)
 }
 
 // GiveUp removes what a run left; the command has no callback.
@@ -131,10 +115,10 @@ func removeVolumeLeftovers(ctx context.Context, p provider.Provider, project str
 	if err != nil {
 		return err
 	}
-	leftover := provider.SnapshotId(volume, snapshotName)
+	leftover := provider.SnapshotId(volume, SnapshotName)
 	for _, snapshot := range snapshots {
 		if snapshot.Name == leftover {
-			return p.DeleteVolumeSnapshot(ctx, project, pool, volume, snapshotName)
+			return p.DeleteVolumeSnapshot(ctx, project, pool, volume, SnapshotName)
 		}
 	}
 	return nil

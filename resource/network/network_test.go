@@ -645,7 +645,10 @@ func strp(value string) *string { return &value }
 
 // titan-ops architecture/desired-and-current.md#provider-state-is-verbatim: whatever word Incus has, it goes as it is.
 func TestDecideReport(t *testing.T) {
-	observed := map[string]string{"net-a": "Created", "net-b": "Pending", "net-c": "Errored", "net-u": "Unknown", "net-v": "Unavailable"}
+	observed := StatusByProjectAndName([]api.Network{
+		{Name: "net-a", Status: "Created"}, {Name: "net-b", Status: "Pending"}, {Name: "net-c", Status: "Errored"},
+		{Name: "net-u", Status: "Unknown"}, {Name: "net-v", Status: "Unavailable"},
+	})
 	cases := []struct {
 		name       string
 		row        ReconcilableNetwork
@@ -740,5 +743,24 @@ func TestReconcile_NetworkReadFails_ReportsNothing(t *testing.T) {
 	}
 	if len(cp.RequestsTo("PATCH ")) != 0 {
 		t.Fatalf("reported on a failed read: %+v", cp.Requests())
+	}
+}
+
+// A network of the same name in another project is not this one (titan-ops features/backup/design.md#incus-backup).
+func TestDecideReport_FindsTheNetworkInItsTenantsProject_NotASameNamedOneElsewhere(t *testing.T) {
+	observed := StatusByProjectAndName([]api.Network{
+		{Name: "net-a", Status: "Created", Project: "t-a"}, {Name: "net-a", Status: "Errored", Project: "t-b"},
+	})
+
+	_, send := DecideReport(ReconcilableNetwork{ExternalId: "net-a", ProjectName: "t-a", CurrentState: strp("Created"),
+		CurrentExistence: "Exists"}, observed)
+	lost, sendLost := DecideReport(ReconcilableNetwork{ExternalId: "net-a", ProjectName: "t-c", CurrentState: strp("Created"),
+		CurrentExistence: "Exists"}, observed)
+
+	if send {
+		t.Fatal("the network in its own project is Created as recorded: nothing to send")
+	}
+	if !sendLost || lost.Exists {
+		t.Fatalf("no net-a in t-c: want NotFound sent, got %+v sent=%v", lost, sendLost)
 	}
 }

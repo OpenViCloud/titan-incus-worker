@@ -266,3 +266,22 @@ func TestReconcile_ReportsOnTheSnapshotsVm_AGoneSnapshotAsNotFound(t *testing.T)
 		t.Fatalf("report line: %v", sent)
 	}
 }
+
+// The snapshot's VM is the instance in the tenant's project, not a same-named one elsewhere
+// (titan-ops features/backup/design.md#incus-backup).
+func TestDecideReport_ReadsTheVmInItsTenantsProject_NotASameNamedOneElsewhere(t *testing.T) {
+	byInstance := SnapshotsByInstance([]api.InstanceFull{
+		{Instance: api.Instance{Name: "vma", Project: "t-a"}, Snapshots: []api.InstanceSnapshot{{Name: "sone"}}},
+		{Instance: api.Instance{Name: "vma", Project: "t-b"}},
+	})
+
+	_, send := DecideReport(ReconcilableVmSnapshot{ExternalId: "vma/sone", ProjectName: "t-a", CurrentExistence: "Exists"}, byInstance)
+	gone, sendGone := DecideReport(ReconcilableVmSnapshot{ExternalId: "vma/sone", ProjectName: "t-b", CurrentExistence: "Exists"}, byInstance)
+
+	if send {
+		t.Fatal("the snapshot is on the VM in t-a as recorded: nothing to send")
+	}
+	if !sendGone || gone.Exists {
+		t.Fatalf("the VM in t-b has no sone: want NotFound sent, got %+v sent=%v", gone, sendGone)
+	}
+}

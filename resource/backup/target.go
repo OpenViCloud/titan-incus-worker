@@ -63,12 +63,23 @@ func (t Target) upload(key string) api.BackupTarget {
 	}
 }
 
+// TimeLayout is how every backup object names the moment it was taken, in its key
+// (titan-ops features/backup/design.md#cluster-restore: a restore parses it back out of the key to find the newest
+// object at or before its restore point).
+const TimeLayout = "20060102T150405Z"
+
 // ObjectKey is where one backup lands. The key alone says what it is, so the bucket is read without the database:
 // incus/<cluster>/<tenant>/<vms|volumes>/<id>/<UTC time>.tar.gz. S3 shows an upload only once it is complete, so an
 // object under the key is a whole backup.
 func ObjectKey(clusterId string, tenantId string, collection string, resourceId string, takenAt time.Time) string {
 	return "incus/" + clusterId + "/" + tenantId + "/" + collection + "/" + resourceId + "/" +
-		takenAt.UTC().Format("20060102T150405Z") + ".tar.gz"
+		takenAt.UTC().Format(TimeLayout) + ".tar.gz"
+}
+
+// ConfigObjectKey is where a cluster's config lands: incus/<cluster>/cluster/<UTC time>.yaml
+// (titan-ops features/backup/design.md#cluster-backup).
+func ConfigObjectKey(clusterId string, takenAt time.Time) string {
+	return "incus/" + clusterId + "/cluster/" + takenAt.UTC().Format(TimeLayout) + ".yaml"
 }
 
 // Objects answers whether an object is in the backup bucket; package bucket is the real one.
@@ -109,8 +120,10 @@ func confirmArrived(ctx context.Context, objects Objects, arrival Arrival, key s
 	}
 }
 
-// snapshotName is the snapshot a backup copies from; a run removes it when done.
-const snapshotName = "backup"
+// SnapshotName is the snapshot a backup copies from; a run removes it when done. A restore rolls an imported archive
+// back to it (titan-ops features/backup/design.md#cluster-restore); an archive without it is an old-format archive the
+// restore cannot use.
+const SnapshotName = "backup"
 
 // cleanUp removes what a run made, with its own deadline, so a run that timed out still cleans up. A step that fails
 // leaves its object to the next run, which removes leftovers first.

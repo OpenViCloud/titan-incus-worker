@@ -32,6 +32,19 @@ func Connect(credentials Credentials) (incus.InstanceServer, error) {
 	return server, nil
 }
 
+// ConnectWithoutRequestTimeout is Connect for the restore, whose import sends a whole disk archive in one request body:
+// the two-minute request timeout of every other caller would cut it (titan-ops features/backup/design.md#cluster-restore).
+// The restore Job's own deadline bounds it instead.
+func ConnectWithoutRequestTimeout(credentials Credentials) (incus.InstanceServer, error) {
+	args := ConnectionArgs(credentials)
+	args.HTTPClient = &http.Client{}
+	server, err := incus.ConnectIncus(credentials.Endpoint, args)
+	if err != nil {
+		return nil, fmt.Errorf("connect to incus at %s: %w", credentials.Endpoint, err)
+	}
+	return server, nil
+}
+
 // ConnectionArgs pins the server in TransportWrapper: the client builds its own transport and discards the one on
 // HTTPClient, so a pin set anywhere else would be lost while InsecureSkipVerify lets every server through.
 func ConnectionArgs(credentials Credentials) *incus.ConnectionArgs {

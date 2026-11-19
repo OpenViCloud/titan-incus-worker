@@ -16,6 +16,13 @@ import (
 type Provider interface {
 	GetProject(ctx context.Context, name string) (*api.Project, error)
 	CreateProject(ctx context.Context, project api.ProjectsPost) error
+	// ListProjects and ListProfiles read what a cluster's config backup keeps (titan-ops features/backup/design.md#cluster-backup).
+	ListProjects(ctx context.Context) ([]api.Project, error)
+	ListProfiles(ctx context.Context, project string) ([]api.Profile, error)
+	// CreateProfile and UpdateProfile rebuild a project's profiles on a restore (titan-ops features/backup/design.md#cluster-restore).
+	// UpdateProfile writes unconditionally: a restore runs alone on a freshly reinstalled host.
+	CreateProfile(ctx context.Context, project string, profile api.ProfilesPost) error
+	UpdateProfile(ctx context.Context, project string, name string, profile api.ProfilePut) error
 
 	GetInstance(ctx context.Context, project string, name string) (*api.Instance, error)
 	// GetInstanceWithEtag also returns the instance's ETag, for an UpdateInstance that must not overwrite a write made
@@ -60,6 +67,9 @@ type Provider interface {
 	DeleteInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) error
 	// GetInstanceSnapshot answers the snapshot, or a 404 error when it is not there.
 	GetInstanceSnapshot(ctx context.Context, project string, instance string, snapshot string) (*api.InstanceSnapshot, error)
+	// ListInstanceSnapshots reads every snapshot of one instance; a restore uses it to find ones Titan no longer lists
+	// (titan-ops features/backup/design.md#cluster-restore).
+	ListInstanceSnapshots(ctx context.Context, project string, instance string) ([]api.InstanceSnapshot, error)
 
 	// A VM's guest filesystem through the Incus agent (vm-key-addition: reading and writing the sshd key file and its
 	// config, titan-ops features/vm/design.md#ssh-key). GetInstanceFile answers IsInstanceFileNotFound when the path is
@@ -81,12 +91,21 @@ type Provider interface {
 	DeleteVolumeSnapshot(ctx context.Context, project string, pool string, volume string, snapshot string) error
 	ListVolumeSnapshots(ctx context.Context, project string, pool string, volume string) ([]api.StorageVolumeSnapshot, error)
 
-	// BackupInstance and BackupVolume have Incus upload an archive of the instance (root disk only) or of the volume
-	// to the S3 target itself, and wait for its operation. The operation ends before the upload does, and drops an upload
+	// BackupInstance and BackupVolume have Incus upload an archive of the instance (root disk only) or of the volume,
+	// each with every snapshot it has, to the S3 target itself, and wait for its operation. The operation ends before the upload does, and drops an upload
 	// failure (read in the v7.0.1 source): the caller checks the bucket (API extension backup_s3_upload; R2 measured in
 	// titan-ops features/backup/design.md#incus-backup).
 	BackupInstance(ctx context.Context, project string, name string, target api.BackupTarget) error
 	BackupVolume(ctx context.Context, project string, pool string, name string, target api.BackupTarget) error
+
+	// ImportInstance and ImportVolume stream a backup archive straight into Incus (no byte of it held on the worker's
+	// disk), naming the instance or volume Titan's externalId and landing it on the cluster's storage pool
+	// (titan-ops features/backup/design.md#cluster-restore).
+	ImportInstance(ctx context.Context, project string, pool string, name string, backupFile io.Reader) error
+	ImportVolume(ctx context.Context, project string, pool string, name string, backupFile io.Reader) error
+	// RestoreVolume puts the volume itself back to one of its own snapshots (StorageVolumePut.Restore), the way a
+	// restore rolls an imported volume back to its "backup" snapshot.
+	RestoreVolume(ctx context.Context, project string, pool string, name string, snapshot string) error
 
 	// Images and aliases live in the default project: Titan's projects have features.images=false (lab 03c).
 	GetImageAlias(ctx context.Context, name string) (*api.ImageAliasesEntry, error)
