@@ -87,10 +87,13 @@ func TestRouterAddress_RefusesWhatCannotHoldARouterAndAVm(t *testing.T) {
 func createLeasedWithPolicies(ingress string, egress string) command.Leased {
 	payload := map[string]any{
 		"networkId": networkId, "requestId": requestId, "name": "backend", "projectName": project,
-		"cidr": "10.40.0.0/24", "defaultEgressPolicy": egress,
+		"cidr": "10.40.0.0/24",
 	}
 	if ingress != "" {
 		payload["defaultIngressPolicy"] = ingress
+	}
+	if egress != "" {
+		payload["defaultEgressPolicy"] = egress
 	}
 	return leased("network.create", payload)
 }
@@ -340,21 +343,23 @@ func TestCreate_WithPublicIpv6_AlreadyOurs_IsCheckedToo(t *testing.T) {
 	}
 }
 
-// On an isolated network every packet is one VM's egress and another's ingress, and Incus applies only the egress
-// default between them (titan-ops features/network/design.md#firewall-default-policy): either Deny blocks, both Allow lets
-// through.
-func TestCreate_MergesTheTwoPolicies(t *testing.T) {
+// Each policy sets the default action of its own direction: Deny on ingress drops what comes from outside the network
+// while the VMs still reach out (titan-ops features/network/design.md#firewall-default-policy). A command without a policy
+// for a direction leaves that direction open.
+func TestCreate_EachPolicySetsItsOwnDirection(t *testing.T) {
 	cases := []struct {
-		ingress string
-		egress  string
-		want    string
+		ingress     string
+		egress      string
+		wantIngress string
+		wantEgress  string
 	}{
-		{"Allow", "Allow", "allow"},
-		{"Deny", "Allow", "drop"},
-		{"Allow", "Deny", "drop"},
-		{"Deny", "Deny", "drop"},
-		{"", "Allow", "allow"},
-		{"", "Deny", "drop"},
+		{"Allow", "Allow", "allow", "allow"},
+		{"Deny", "Allow", "drop", "allow"},
+		{"Allow", "Deny", "allow", "drop"},
+		{"Deny", "Deny", "drop", "drop"},
+		{"", "Allow", "allow", "allow"},
+		{"", "Deny", "allow", "drop"},
+		{"Deny", "", "drop", "allow"},
 	}
 	for _, c := range cases {
 		cp := testsupport.NewControlPlane(t)
@@ -368,8 +373,8 @@ func TestCreate_MergesTheTwoPolicies(t *testing.T) {
 		config := p.CreatedNetworks[0].Config
 		gotIngress := config["security.acls.default.ingress.action"]
 		gotEgress := config["security.acls.default.egress.action"]
-		if gotIngress != c.want || gotEgress != c.want {
-			t.Errorf("ingress %q egress %q: want %q/%q, got %q/%q", c.ingress, c.egress, c.want, c.want, gotIngress, gotEgress)
+		if gotIngress != c.wantIngress || gotEgress != c.wantEgress {
+			t.Errorf("ingress %q egress %q: want %q/%q, got %q/%q", c.ingress, c.egress, c.wantIngress, c.wantEgress, gotIngress, gotEgress)
 		}
 	}
 }
@@ -499,7 +504,7 @@ func TestCreate_NetworkAndAclExist_IsOurs_AndTheNetworkGetsItsAclSettings(t *tes
 		t.Fatalf("want one network update, got %d", len(p.UpdatedNetworks))
 	}
 	updated := p.UpdatedNetworks[0]
-	if updated.Config["security.acls"] != "acl-"+networkId || updated.Config["security.acls.default.egress.action"] != "drop" ||
+	if updated.Config["security.acls"] != "acl-"+networkId || updated.Config["security.acls.default.egress.action"] != "allow" ||
 		updated.Config["security.acls.default.ingress.action"] != "drop" || updated.Config["ipv4.address"] != "10.40.0.1/24" {
 		t.Fatalf("update: %+v", updated.Config)
 	}
