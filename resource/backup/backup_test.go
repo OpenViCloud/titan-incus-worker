@@ -137,8 +137,9 @@ func TestVm_BacksUpTheVmItselfWithItsSnapshots_AfterASnapshotOfThisMoment_ToTheT
 	}
 }
 
-// Leftovers of a run that died midway (worker restart, lease lost) are removed first, or the snapshot would refuse to be
-// made again; so is a copy that a worker from before the archive carried snapshots left behind.
+// The backup snapshot a run that died midway (worker restart, lease lost) left is removed first, or the snapshot would
+// refuse to be made again. Nothing else in the project is touched, not even an instance named like the copies an older
+// worker made (titan-ops features/backup/design.md#incus-backup).
 func TestVm_ARunAfterOneThatDiedMidway_RemovesItsLeftoversFirst(t *testing.T) {
 	p := testsupport.NewProvider()
 	runningVm(p)
@@ -150,11 +151,14 @@ func TestVm_ARunAfterOneThatDiedMidway_RemovesItsLeftoversFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(strings.Join(p.BackupOrder, "\n"), "delete-instance "+project+"/bk"+encodedId+"\ndelete-snapshot "+project+"/"+instanceName+"/backup\nsnapshot ") {
+	if !strings.HasPrefix(strings.Join(p.BackupOrder, "\n"), "delete-snapshot "+project+"/"+instanceName+"/backup\nsnapshot ") {
 		t.Fatalf("order: %v", p.BackupOrder)
 	}
 	if len(p.InstanceBackups) != 1 {
 		t.Fatalf("backups: %+v", p.InstanceBackups)
+	}
+	if p.Instances[project+"/bk"+encodedId] == nil {
+		t.Fatal("removed an instance the run did not make")
 	}
 }
 
@@ -226,8 +230,11 @@ func TestVm_GiveUp_RemovesLeftovers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(p.BackupOrder, "\n") != "delete-instance "+project+"/bk"+encodedId+"\ndelete-snapshot "+project+"/"+instanceName+"/backup" {
+	if strings.Join(p.BackupOrder, "\n") != "delete-snapshot "+project+"/"+instanceName+"/backup" {
 		t.Fatalf("order: %v", p.BackupOrder)
+	}
+	if p.Instances[project+"/bk"+encodedId] == nil {
+		t.Fatal("removed an instance the run did not make")
 	}
 }
 
@@ -344,7 +351,8 @@ func TestVolume_ObjectNeverArrives_IsRetryable(t *testing.T) {
 	}
 }
 
-// A volume run that died midway left its copy and its snapshot: the next run removes both before snapshotting again.
+// A volume run that died midway left its snapshot: the next run removes it before snapshotting again, and touches no
+// other volume, not even one named like the copies an older worker made.
 func TestVolume_ARunAfterOneThatDiedMidway_RemovesItsLeftoversFirst(t *testing.T) {
 	p := testsupport.NewProvider()
 	p.Volumes[project+"/"+volumeName] = &api.StorageVolume{Name: volumeName, Type: "custom", Project: project}
@@ -356,10 +364,12 @@ func TestVolume_ARunAfterOneThatDiedMidway_RemovesItsLeftoversFirst(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantStart := "delete-volume " + project + "/bkv" + encodedId + "\ndelete-volume-snapshot " + project + "/" + volumeName +
-		"/backup\nsnapshot-volume "
+	wantStart := "delete-volume-snapshot " + project + "/" + volumeName + "/backup\nsnapshot-volume "
 	if !strings.HasPrefix(strings.Join(p.BackupOrder, "\n"), wantStart) {
 		t.Fatalf("order: %v", p.BackupOrder)
+	}
+	if p.Volumes[project+"/bkv"+encodedId] == nil {
+		t.Fatal("removed a volume the run did not make")
 	}
 }
 
@@ -373,8 +383,11 @@ func TestVolume_GiveUp_RemovesLeftovers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "delete-volume " + project + "/bkv" + encodedId + "\ndelete-volume-snapshot " + project + "/" + volumeName + "/backup"
+	want := "delete-volume-snapshot " + project + "/" + volumeName + "/backup"
 	if strings.Join(p.BackupOrder, "\n") != want {
 		t.Fatalf("order: %v", p.BackupOrder)
+	}
+	if p.Volumes[project+"/bkv"+encodedId] == nil {
+		t.Fatal("removed a volume the run did not make")
 	}
 }
