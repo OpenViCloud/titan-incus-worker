@@ -15,10 +15,6 @@ const (
 	instancePrefix = "vm"
 	volumePrefix   = "vol"
 	snapshotPrefix = "s"
-	// A backup uploads a stopped copy of a snapshot, never the disk a running VM is writing
-	// (titan-ops features/backup/design.md#incus-backup).
-	backupInstanceCopyPrefix = "bk"
-	backupVolumeCopyPrefix   = "bkv"
 )
 
 var lowerBase32 = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
@@ -47,14 +43,6 @@ func IsInstanceName(name string) bool {
 
 func VolumeName(volumeId string) (string, error) {
 	return objectName(volumePrefix, volumeId)
-}
-
-func BackupInstanceCopyName(vmId string) (string, error) {
-	return objectName(backupInstanceCopyPrefix, vmId)
-}
-
-func BackupVolumeCopyName(volumeId string) (string, error) {
-	return objectName(backupVolumeCopyPrefix, volumeId)
 }
 
 // SnapshotName names a snapshot of an instance or of a volume; it is unique under its parent.

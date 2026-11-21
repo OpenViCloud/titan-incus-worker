@@ -45,10 +45,6 @@ func (h *Vm) Run(ctx context.Context, leased command.Leased, logger *slog.Logger
 	if err := h.target.usable(); err != nil {
 		return err
 	}
-	copyName, err := provider.BackupInstanceCopyName(payload.VmId)
-	if err != nil {
-		return command.Permanent(err)
-	}
 	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
@@ -63,7 +59,7 @@ func (h *Vm) Run(ctx context.Context, leased command.Leased, logger *slog.Logger
 	if err != nil {
 		return err
 	}
-	if err := removeVmLeftovers(ctx, p, project, instance, copyName); err != nil {
+	if err := removeVmLeftovers(ctx, p, project, instance); err != nil {
 		return err
 	}
 
@@ -91,26 +87,18 @@ func (h *Vm) GiveUp(ctx context.Context, leased command.Leased, cause error, log
 	if err != nil {
 		return nil
 	}
-	copyName, err := provider.BackupInstanceCopyName(payload.VmId)
-	if err != nil {
-		return nil
-	}
 	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return nil
 	}
-	if err := removeVmLeftovers(ctx, cl.Provider, payload.ProjectName, payload.ExternalVmId, copyName); err != nil {
+	if err := removeVmLeftovers(ctx, cl.Provider, payload.ProjectName, payload.ExternalVmId); err != nil {
 		logger.Warn("removing the backup's leftovers failed; the next run removes them", "error", err)
 	}
 	return nil
 }
 
-// removeVmLeftovers removes the backup snapshot a run that died left, and the copy that a worker from before the archive
-// carried snapshots made (titan-ops features/backup/design.md#incus-backup).
-func removeVmLeftovers(ctx context.Context, p provider.Provider, project string, instance string, copyName string) error {
-	if err := deleteInstanceIfThere(ctx, p, project, copyName); err != nil {
-		return err
-	}
+// removeVmLeftovers removes the backup snapshot a run that died left.
+func removeVmLeftovers(ctx context.Context, p provider.Provider, project string, instance string) error {
 	_, err := p.GetInstanceSnapshot(ctx, project, instance, SnapshotName)
 	if provider.IsNotFound(err) {
 		return nil
@@ -119,17 +107,6 @@ func removeVmLeftovers(ctx context.Context, p provider.Provider, project string,
 		return err
 	}
 	return p.DeleteInstanceSnapshot(ctx, project, instance, SnapshotName)
-}
-
-func deleteInstanceIfThere(ctx context.Context, p provider.Provider, project string, name string) error {
-	_, err := p.GetInstance(ctx, project, name)
-	if provider.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return p.DeleteInstance(ctx, project, name)
 }
 
 func decodeVm(leased command.Leased) (vmPayload, error) {

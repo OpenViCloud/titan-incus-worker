@@ -41,10 +41,6 @@ func (h *Volume) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err := h.target.usable(); err != nil {
 		return err
 	}
-	copyName, err := provider.BackupVolumeCopyName(payload.VolumeId)
-	if err != nil {
-		return command.Permanent(err)
-	}
 	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return err
@@ -60,7 +56,7 @@ func (h *Volume) Run(ctx context.Context, leased command.Leased, logger *slog.Lo
 	if err != nil {
 		return err
 	}
-	if err := removeVolumeLeftovers(ctx, p, project, pool, volume, copyName); err != nil {
+	if err := removeVolumeLeftovers(ctx, p, project, pool, volume); err != nil {
 		return err
 	}
 
@@ -90,27 +86,20 @@ func (h *Volume) GiveUp(ctx context.Context, leased command.Leased, cause error,
 	if err != nil {
 		return nil
 	}
-	copyName, err := provider.BackupVolumeCopyName(payload.VolumeId)
-	if err != nil {
-		return nil
-	}
 	cl, err := h.clusters.Cluster(ctx, leased.ClusterId)
 	if err != nil {
 		return nil
 	}
 	pool := provider.StoragePoolOrDefault(cl.StoragePool)
-	err = removeVolumeLeftovers(ctx, cl.Provider, payload.ProjectName, pool, payload.ExternalVolumeId, copyName)
+	err = removeVolumeLeftovers(ctx, cl.Provider, payload.ProjectName, pool, payload.ExternalVolumeId)
 	if err != nil {
 		logger.Warn("removing the backup's leftovers failed; the next run removes them", "error", err)
 	}
 	return nil
 }
 
-func removeVolumeLeftovers(ctx context.Context, p provider.Provider, project string, pool string, volume string,
-	copyName string) error {
-	if err := deleteVolumeIfThere(ctx, p, project, pool, copyName); err != nil {
-		return err
-	}
+// removeVolumeLeftovers removes the backup snapshot a run that died left.
+func removeVolumeLeftovers(ctx context.Context, p provider.Provider, project string, pool string, volume string) error {
 	snapshots, err := p.ListVolumeSnapshots(ctx, project, pool, volume)
 	if err != nil {
 		return err
@@ -122,17 +111,6 @@ func removeVolumeLeftovers(ctx context.Context, p provider.Provider, project str
 		}
 	}
 	return nil
-}
-
-func deleteVolumeIfThere(ctx context.Context, p provider.Provider, project string, pool string, name string) error {
-	_, err := p.GetVolume(ctx, project, pool, name)
-	if provider.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return p.DeleteVolume(ctx, project, pool, name)
 }
 
 func decodeVolume(leased command.Leased) (volumePayload, error) {

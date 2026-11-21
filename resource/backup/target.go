@@ -120,9 +120,9 @@ func confirmArrived(ctx context.Context, objects Objects, arrival Arrival, key s
 	}
 }
 
-// SnapshotName is the snapshot a backup copies from; a run removes it when done. A restore rolls an imported archive
-// back to it (titan-ops features/backup/design.md#cluster-restore); an archive without it is an old-format archive the
-// restore cannot use.
+// SnapshotName is the snapshot a backup takes right before the export; a run removes it when done. A restore rolls an
+// imported archive back to it (titan-ops features/backup/design.md#cluster-restore); an archive without it is an
+// old-format archive the restore cannot use.
 const SnapshotName = "backup"
 
 // cleanUp removes what a run made, with its own deadline, so a run that timed out still cleans up. A step that fails
