@@ -138,8 +138,8 @@ func TestVm_BacksUpTheVmItselfWithItsSnapshots_AfterASnapshotOfThisMoment_ToTheT
 }
 
 // The backup snapshot a run that died midway (worker restart, lease lost) left is removed first, or the snapshot would
-// refuse to be made again. Nothing else in the project is touched, not even an instance named like the copies an older
-// worker made (titan-ops features/backup/design.md#incus-backup).
+// refuse to be made again. No other instance is removed, not even one named like the copies an older worker made
+// (titan-ops features/backup/design.md#incus-backup).
 func TestVm_ARunAfterOneThatDiedMidway_RemovesItsLeftoversFirst(t *testing.T) {
 	p := testsupport.NewProvider()
 	runningVm(p)
