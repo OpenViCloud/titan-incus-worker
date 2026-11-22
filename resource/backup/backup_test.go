@@ -125,8 +125,8 @@ func TestVm_BacksUpTheVmItselfWithItsSnapshots_AfterASnapshotOfThisMoment_ToTheT
 	if strings.Join(p.BackupOrder, "\n") != strings.Join(wantOrder, "\n") {
 		t.Fatalf("order:\n%s\nwant:\n%s", strings.Join(p.BackupOrder, "\n"), strings.Join(wantOrder, "\n"))
 	}
-	if len(p.InstanceBackups) != 1 || len(p.Copies) != 0 {
-		t.Fatalf("backups: %+v, copies: %+v", p.InstanceBackups, p.Copies)
+	if len(p.InstanceBackups) != 1 || len(p.CreatedInstances) != 0 {
+		t.Fatalf("backups: %+v, instances created: %+v", p.InstanceBackups, p.CreatedInstances)
 	}
 	sent := p.InstanceBackups[0].Target
 	wantKey := "incus/mock/" + tenantId + "/vms/" + vmId + "/20261026T020709Z.tar.gz"

@@ -129,9 +129,7 @@ type Provider struct {
 	CreatedDirectories    []string
 	InstanceSnapshots     map[string]bool // key: project + "/" + instance + "/" + snapshot
 	// SnapshotDevices holds the instance's devices at the time of each snapshot, under the same key.
-	SnapshotDevices map[string]map[string]map[string]string
-	// Copies holds each instance a copy made, with its devices, as it was when made.
-	Copies                   []api.Instance
+	SnapshotDevices          map[string]map[string]map[string]string
 	CreateSnapshotErr        error
 	GetSnapshotErr           error
 	DeleteSnapshotErr        error
@@ -377,28 +375,7 @@ func (p *Provider) GetInstanceFull(ctx context.Context, project string, name str
 func (p *Provider) CreateInstance(ctx context.Context, project string, instance api.InstancesPost) error {
 	p.count()
 	p.CreatedInstances = append(p.CreatedInstances, instance)
-	isCopy := instance.Source.Type == "copy"
-	if isCopy && p.CreateInstanceErr == nil {
-		p.BackupOrder = append(p.BackupOrder, "copy "+project+"/"+instance.Source.Source+" -> "+instance.Name)
-		devices := copiedDevices(p.SnapshotDevices[project+"/"+instance.Source.Source], instance.Devices)
-		copied := &api.Instance{Name: instance.Name, StatusCode: api.Stopped, InstancePut: api.InstancePut{Devices: devices}}
-		p.Instances[project+"/"+instance.Name] = copied
-		p.Copies = append(p.Copies, *copied)
-	}
 	return p.CreateInstanceErr
-}
-
-// copiedDevices is what Incus gives a copy: the source's devices, each replaced by a device of the same name in the
-// request (createFromCopy in cmd/incusd/instances_post.go of Incus v7.0.1; measured on dev: incus/provider/testdata/lab-backup-copy-2026-10-28.log).
-func copiedDevices(source map[string]map[string]string, requested map[string]map[string]string) map[string]map[string]string {
-	devices := map[string]map[string]string{}
-	for name, settings := range source {
-		devices[name] = settings
-	}
-	for name, settings := range requested {
-		devices[name] = settings
-	}
-	return devices
 }
 
 func (p *Provider) UpdateInstanceState(ctx context.Context, project string, name string, state api.InstanceStatePut) error {
@@ -878,9 +855,6 @@ func (p *Provider) CreateVolume(ctx context.Context, project string, pool string
 		return p.CreateVolumeErr
 	}
 	p.Volumes[project+"/"+volume.Name] = &api.StorageVolume{Name: volume.Name, Type: "custom", Project: project}
-	if volume.Source.Type == "copy" {
-		p.BackupOrder = append(p.BackupOrder, "copy-volume "+project+"/"+volume.Source.Name+" -> "+volume.Name)
-	}
 	return nil
 }
 
