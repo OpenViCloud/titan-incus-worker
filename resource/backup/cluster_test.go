@@ -163,3 +163,26 @@ func TestCluster_ALeaseReadThatFails_WritesNothing_AndIsRetryable(t *testing.T) 
 		t.Fatalf("err %v, put %v", err, store.put)
 	}
 }
+
+// A restore drill's project is made while the day's config may be taken (titan-ops features/backup/design.md#restore-drill):
+// the config never carries it, with its network, or a restore would rebuild it.
+func TestCluster_ADrillsTemporaryProject_IsNotInTheConfig_WhateverItHolds(t *testing.T) {
+	p := tenantCluster()
+	p.Projects["drill-20261026"] = true
+	p.Profiles["drill-20261026"] = []api.Profile{{Name: "default"}}
+	p.Networks = append(p.Networks, api.Network{Name: "net-1", Project: "drill-20261026", Type: "ovn"})
+	store := &fakeStore{}
+
+	err := newCluster(p, target, store).Run(context.Background(), clusterLeased(), testsupport.DiscardLogger())
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config ClusterConfig
+	if err := yaml.Unmarshal(store.put["incus/mock/cluster/20261026T020709Z.yaml"], &config); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Projects) != 1 || config.Projects[0].Project.Name != project {
+		t.Fatalf("projects in the config: %+v", config.Projects)
+	}
+}
