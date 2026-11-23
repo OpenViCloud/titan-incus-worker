@@ -327,7 +327,7 @@ func TestRun_NotEnoughPoolSpace_FailsPermanentBeforeAnythingIsCreated(t *testing
 	}
 }
 
-// The draft rule of design.md: free >= 1.5 x (root disk + attached volumes) + 10% of the pool.
+// The rule of titan-ops features/backup/design.md#restore-drill: free >= 1.5 x (root disk + attached volumes) + 10% of the pool.
 func TestRun_FreeSpace_IsExactlyTheRequirement_Passes_AndOneByteLess_Fails(t *testing.T) {
 	required := 9*gib + 4*gib // 1.5 x 6 GiB + 10% of 40 GiB
 	for name, tc := range map[string]struct {

@@ -23,9 +23,9 @@ go run .
 |---|---|---|
 | `CP_BASE_URL` | (required) | Control plane base URL |
 | `CP_INTERNAL_TOKEN` | (required) | Sent as `X-Internal-Token` on every `/internal` call |
-| `WORKER_ROLE` | `all` | Which loops this process runs: `commands` (customer commands and backups), `inventory` (reading every cluster: state and VM usage), `all` of them, or `restore` (a one-shot rebuild of one cluster from the backup bucket; runs no loop, exits 0 or 1). Command processes can run side by side; run one process of role `inventory` or `all`, or each cluster is read and reported once per such process |
-| `COMMAND_SLOTS` | `4` | How many customer commands one process runs at once; backups run one at a time on a loop of their own. Which commands may run side by side is the control plane's lease rule |
-| `POLL_INTERVAL` | `2s` | How often each idle command slot, and the backup loop, asks for a command |
+| `WORKER_ROLE` | `all` | Which loops this process runs: `commands` (customer commands, backups and restore drills), `inventory` (reading every cluster: state and VM usage), `all` of them, or `restore` (a one-shot rebuild of one cluster from the backup bucket; runs no loop, exits 0 or 1). Command processes can run side by side; run one process of role `inventory` or `all`, or each cluster is read and reported once per such process |
+| `COMMAND_SLOTS` | `4` | How many customer commands one process runs at once; backups and restore drills each run one at a time on a loop of their own. Which commands may run side by side is the control plane's lease rule |
+| `POLL_INTERVAL` | `2s` | How often each idle command slot, the backup loop and the drill loop ask for a command |
 | `RECONCILE_INTERVAL` | `2m` | How often each cluster is read from Incus |
 | `METRICS_INTERVAL` | `60s` | How often each cluster's VM usage (CPU, memory, root filesystem, disk I/O) is read from Incus and sent to the control plane |
 | `IMAGE_SERVER` | `https://images.linuxcontainers.org` | Where templates without their own image URL come from |
@@ -41,9 +41,9 @@ Packages are grouped by role, and imports go one way (`dependency_test.go` fails
 
 | Package | Role |
 |---|---|
-| `main.go` | The one place that knows every package: routes each command kind and starts the loops of its `WORKER_ROLE`; backups run on a command loop of their own, so a long upload never holds a tenant's command |
+| `main.go` | The one place that knows every package: routes each command kind and starts the loops of its `WORKER_ROLE`; backups and restore drills each run on a command loop of their own, so a long upload or import never holds a tenant's command |
 | `loop/command`, `loop/reconcile` | Lease, retry and log each command · the reconcile cycle per cluster and kind; know no resource |
-| `resource/<kind>/` | One resource each: a file per verb, its report and, for most, its reconciler · `resource/backup/` is the first exception: it backs up a VM, a volume and a cluster's config (`vm.go`, `volume.go`, `cluster.go`), has no callback, so no report, and no reconciler · `resource/restore/` rebuilds a cluster from the bucket for `WORKER_ROLE=restore`, once, with no command and no reconciler · `resource/vmkeyaddition/` has a report but no reconciler: a key addition leaves nothing on Incus to observe |
+| `resource/<kind>/` | One resource each: a file per verb, its report and, for most, its reconciler · `resource/backup/` is the first exception: it backs up a VM, a volume and a cluster's config (`vm.go`, `volume.go`, `cluster.go`), has no callback, so no report, and no reconciler · `resource/restore/` rebuilds a cluster from the bucket for `WORKER_ROLE=restore`, once, with no command and no reconciler · `resource/drill/` runs the one command `restore.drill`: it imports one VM or volume from its newest archive into a temporary `drill-` project, rolls back, and deletes the project; no callback, so no report, and no reconciler · `resource/vmkeyaddition/` has a report but no reconciler: a key addition leaves nothing on Incus to observe |
 | `incus/provider`, `incus/cluster` | The Incus port and every name Titan gives things on Incus · cluster id → connection |
 | `controlplane/` | Calls the control plane |
 | `bucket/` | Reads and writes the backup bucket: whether a backup's object arrived, lists and reads objects for a restore, writes a cluster's config |
