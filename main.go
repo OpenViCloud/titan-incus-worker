@@ -22,6 +22,7 @@ import (
 	"github.com/OpenViCloud/titan-incus-worker/loop/command"
 	"github.com/OpenViCloud/titan-incus-worker/loop/reconcile"
 	"github.com/OpenViCloud/titan-incus-worker/resource/backup"
+	"github.com/OpenViCloud/titan-incus-worker/resource/drill"
 	"github.com/OpenViCloud/titan-incus-worker/resource/firewall"
 	"github.com/OpenViCloud/titan-incus-worker/resource/loadbalancer"
 	"github.com/OpenViCloud/titan-incus-worker/resource/network"
@@ -46,11 +47,18 @@ const (
 	templateSyncTimeout   = 60 * time.Minute
 	// Incus uploads a whole disk; on the dev Mac a 5 GiB root took 17 minutes at the link's upload speed.
 	backupTimeout = 6 * time.Hour
+	// A drill imports a whole disk (the 5 GiB root of the dev lab took 7 minutes, so a 500 GiB disk takes hours) and
+	// deletes its project, all on the cluster's own host.
+	drillTimeout = 6 * time.Hour
 )
 
 // backupKinds run on a loop of their own: one backup holds its loop for as long as the upload takes, and a tenant's
 // create or delete must not wait behind it. A cluster's config is asked after the day's disks and waits behind them.
 var backupKinds = []string{"vm.backup", "volume.backup", "cluster.backup"}
+
+// drillKinds run on a loop of their own too: one drill holds its loop for as long as it imports a disk, and neither a
+// tenant's command nor the day's backups may wait behind it (titan-ops features/backup/design.md#restore-drill).
+var drillKinds = []string{"restore.drill"}
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil)).With("worker", hostnameOrUnknown())
@@ -74,10 +82,11 @@ func main() {
 		os.Exit(code)
 	}
 
-	tenantRoutes, backupRoutes := splitBackupRoutes(routes(cp, clusters, loaded.imageServer, loaded.backupTarget))
+	tenantRoutes, backupRoutes, drillRoutes := splitRoutes(routes(cp, clusters, loaded.imageServer, loaded.backupTarget))
 	running := loops{
 		commands:   command.NewPool(cp, tenantRoutes, loaded.pollInterval, loaded.commandSlots, logger),
 		backups:    command.NewLoop(cp, backupRoutes, loaded.pollInterval, logger.With("loop", "backup")),
+		drills:     command.NewLoop(cp, drillRoutes, loaded.pollInterval, logger.With("loop", "drill")),
 		reconciler: reconcile.NewRunner(cp, clusters, reconcilers(), loaded.reconcileInterval, logger),
 		metrics:    reconcile.NewRunner(cp, clusters, metricsReconcilers(), loaded.metricsInterval, logger.With("loop", "metrics")),
 	}.of(loaded.role)
@@ -161,6 +170,8 @@ func routes(cp *controlplane.Client, clusters cluster.Clusters, imageServer stri
 		"volume.backup": {Handler: backup.NewVolume(clusters, target, objects), Timeout: backupTimeout},
 		// A few reads of the Incus API and one small object.
 		"cluster.backup": {Handler: backup.NewCluster(clusters, target, objects), Timeout: networkCommandTimeout},
+
+		"restore.drill": {Handler: drill.New(clusters, objects), Timeout: drillTimeout},
 	}
 }
 
@@ -170,27 +181,29 @@ type runner interface {
 
 // loops are every loop a worker has; a role runs some of them.
 type loops struct {
-	commands, backups, reconciler, metrics runner
+	commands, backups, drills, reconciler, metrics runner
 }
 
-// of lists the loops of role: a commands process leases, an inventory process reads the clusters, all does both.
+// of lists the loops of role: a commands process leases (tenant commands, backups, drills), an inventory process reads
+// the clusters, all does both.
 // Leases may come from any number of processes, while two processes of role inventory or all would read and report
 // each cluster twice per cycle (titan-ops architecture/worker-structure.md#worker-roles).
 func (l loops) of(r role) []runner {
 	switch r {
 	case roleCommands:
-		return []runner{l.commands, l.backups}
+		return []runner{l.commands, l.backups, l.drills}
 	case roleInventory:
 		return []runner{l.reconciler, l.metrics}
 	default:
-		return []runner{l.commands, l.backups, l.reconciler, l.metrics}
+		return []runner{l.commands, l.backups, l.drills, l.reconciler, l.metrics}
 	}
 }
 
-// splitBackupRoutes takes the backup kinds out of all routes, for their own loop.
-func splitBackupRoutes(all map[string]command.Route) (map[string]command.Route, map[string]command.Route) {
+// splitRoutes takes the backup kinds and the drill kinds out of all routes, each for its own loop.
+func splitRoutes(all map[string]command.Route) (map[string]command.Route, map[string]command.Route, map[string]command.Route) {
 	tenant := map[string]command.Route{}
 	backups := map[string]command.Route{}
+	drills := map[string]command.Route{}
 	for kind, route := range all {
 		tenant[kind] = route
 	}
@@ -198,7 +211,11 @@ func splitBackupRoutes(all map[string]command.Route) (map[string]command.Route, 
 		backups[kind] = tenant[kind]
 		delete(tenant, kind)
 	}
-	return tenant, backups
+	for _, kind := range drillKinds {
+		drills[kind] = tenant[kind]
+		delete(tenant, kind)
+	}
+	return tenant, backups, drills
 }
 
 // reconcilers lists every resource the reconcile loop observes, in the order of one cluster's cycle.

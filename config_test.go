@@ -128,7 +128,7 @@ func TestLoadConfig_ReadsTheBackupTarget_AndStartsWithoutIt(t *testing.T) {
 
 // A backup holds its loop for the whole upload; tenant commands must be leased by a loop that never runs one.
 func TestBackupKinds_HaveALoopOfTheirOwn(t *testing.T) {
-	tenant, backups := splitBackupRoutes(routes(nil, nil, "", backup.Target{}))
+	tenant, backups, drills := splitRoutes(routes(nil, nil, "", backup.Target{}))
 
 	names := []string{}
 	for kind := range backups {
@@ -139,12 +139,12 @@ func TestBackupKinds_HaveALoopOfTheirOwn(t *testing.T) {
 		t.Fatalf("backup loop: %v", names)
 	}
 	for kind := range tenant {
-		if strings.HasSuffix(kind, ".backup") {
+		if strings.HasSuffix(kind, ".backup") || strings.HasSuffix(kind, ".drill") {
 			t.Errorf("%s is leased by the tenant loop", kind)
 		}
 	}
-	if len(tenant)+len(backups) != len(routes(nil, nil, "", backup.Target{})) {
-		t.Fatalf("a route was lost: %d + %d", len(tenant), len(backups))
+	if len(tenant)+len(backups)+len(drills) != len(routes(nil, nil, "", backup.Target{})) {
+		t.Fatalf("a route was lost: %d + %d + %d", len(tenant), len(backups), len(drills))
 	}
 	for kind, route := range backups {
 		if route.Handler == nil || route.Timeout <= 0 {

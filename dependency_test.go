@@ -28,6 +28,8 @@ var allowedGroupEdges = map[string][]string{
 var resourceEdgeAllowlist = map[string]string{
 	"resource/volsnapshot -> resource/volume": "a volume snapshot's callback and the snapshot list are the volume's: the storage reconciler observes both",
 	"resource/restore -> resource/backup":     "the restore reads the object keys, the backup snapshot's name and the config YAML the backup writes",
+	"resource/drill -> resource/backup":       "the drill finds an archive by the object key the backup writes and reads the layout of its time",
+	"resource/drill -> resource/restore":      "the drill runs the restore's own import steps on a VM or volume, so what it verifies is what a restore does",
 }
 
 // Resources implement loop/command's Handler; the reconcile loop calls them, never the other way round.

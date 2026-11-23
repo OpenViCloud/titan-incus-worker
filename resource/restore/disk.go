@@ -30,7 +30,7 @@ func restoreVolumes(ctx context.Context, p provider.Provider, pool string, rows 
 			summary.Skipped++
 			continue
 		}
-		if err := importVolume(ctx, p, pool, row.ProjectName, row.ExternalId, chosen, objects, logger); err != nil {
+		if err := ImportVolume(ctx, p, pool, row.ProjectName, row.ExternalId, chosen.Key, objects, logger); err != nil {
 			logger.Warn("restore volume failed", "volumeId", row.Id, "project", row.ProjectName, "volume", row.ExternalId,
 				"object", chosen.Key, "error", err)
 			summary.Failed++
@@ -43,33 +43,38 @@ func restoreVolumes(ctx context.Context, p provider.Provider, pool string, rows 
 	}
 }
 
-// importVolume streams the archive into Incus, checks it carries the backup snapshot (an archive without one is an
-// old-format archive this restore cannot use), then rolls the volume back to it and removes it.
-func importVolume(ctx context.Context, p provider.Provider, pool string, project string, name string, chosen archiveKey,
+// ImportVolume streams the archive at key into Incus, checks it carries the backup snapshot (an archive without one is
+// an old-format archive this restore cannot use), then rolls the volume back to it and removes it. A restore drill runs
+// the same steps in its temporary project (titan-ops features/backup/design.md#restore-drill), so each error names its
+// step.
+func ImportVolume(ctx context.Context, p provider.Provider, pool string, project string, name string, key string,
 	objects Objects, logger *slog.Logger) error {
-	body, err := objects.Get(ctx, chosen.Key)
+	body, err := objects.Get(ctx, key)
 	if err != nil {
-		return err
+		return fmt.Errorf("read archive %s: %w", key, err)
 	}
 	defer body.Close()
 	if err := p.ImportVolume(ctx, project, pool, name, body); err != nil {
-		return err
+		return fmt.Errorf("import volume %s: %w", name, err)
 	}
 	has, err := hasVolumeSnapshot(ctx, p, pool, project, name, backup.SnapshotName)
 	if err != nil {
-		return err
+		return fmt.Errorf("look for the %q snapshot of volume %s: %w", backup.SnapshotName, name, err)
 	}
 	if !has {
 		if deleteErr := p.DeleteVolume(ctx, project, pool, name); deleteErr != nil {
 			logger.Warn("removing an old-format archive's import failed; the next restore finds it there",
 				"project", project, "volume", name, "error", deleteErr)
 		}
-		return fmt.Errorf("archive %s has no %q snapshot: an old-format archive, not usable", chosen.Key, backup.SnapshotName)
+		return fmt.Errorf("archive %s has no %q snapshot: an old-format archive, not usable", key, backup.SnapshotName)
 	}
 	if err := p.RestoreVolume(ctx, project, pool, name, backup.SnapshotName); err != nil {
-		return err
+		return fmt.Errorf("roll volume %s back to %q: %w", name, backup.SnapshotName, err)
 	}
-	return p.DeleteVolumeSnapshot(ctx, project, pool, name, backup.SnapshotName)
+	if err := p.DeleteVolumeSnapshot(ctx, project, pool, name, backup.SnapshotName); err != nil {
+		return fmt.Errorf("delete the %q snapshot of volume %s: %w", backup.SnapshotName, name, err)
+	}
+	return nil
 }
 
 func hasVolumeSnapshot(ctx context.Context, p provider.Provider, pool string, project string, volume string, snapshot string) (bool, error) {
@@ -129,7 +134,7 @@ func restoreVms(ctx context.Context, p provider.Provider, pool string, rows []ti
 			summary.Skipped++
 			continue
 		}
-		if err := importVm(ctx, p, pool, row.ProjectName, row.ExternalId, chosen, objects, logger); err != nil {
+		if err := ImportVm(ctx, p, pool, row.ProjectName, row.ExternalId, chosen.Key, objects, logger); err != nil {
 			logger.Warn("restore vm failed", "vmId", row.Id, "project", row.ProjectName, "vm", row.ExternalId,
 				"object", chosen.Key, "error", err)
 			summary.Failed++
@@ -160,15 +165,17 @@ func shouldStart(currentState *string) bool {
 	return *currentState == "Running" || *currentState == "Ready"
 }
 
-func importVm(ctx context.Context, p provider.Provider, pool string, project string, name string, chosen archiveKey,
+// ImportVm is ImportVolume's steps for a VM: import, the backup snapshot there, a full rollback to it, the snapshot
+// removed.
+func ImportVm(ctx context.Context, p provider.Provider, pool string, project string, name string, key string,
 	objects Objects, logger *slog.Logger) error {
-	body, err := objects.Get(ctx, chosen.Key)
+	body, err := objects.Get(ctx, key)
 	if err != nil {
-		return err
+		return fmt.Errorf("read archive %s: %w", key, err)
 	}
 	defer body.Close()
 	if err := p.ImportInstance(ctx, project, pool, name, body); err != nil {
-		return err
+		return fmt.Errorf("import vm %s: %w", name, err)
 	}
 	_, err = p.GetInstanceSnapshot(ctx, project, name, backup.SnapshotName)
 	if provider.IsNotFound(err) {
@@ -176,17 +183,20 @@ func importVm(ctx context.Context, p provider.Provider, pool string, project str
 			logger.Warn("removing an old-format archive's import failed; the next restore finds it there",
 				"project", project, "vm", name, "error", deleteErr)
 		}
-		return fmt.Errorf("archive %s has no %q snapshot: an old-format archive, not usable", chosen.Key, backup.SnapshotName)
+		return fmt.Errorf("archive %s has no %q snapshot: an old-format archive, not usable", key, backup.SnapshotName)
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("look for the %q snapshot of vm %s: %w", backup.SnapshotName, name, err)
 	}
 	// Full restore, not disk-only: the backup snapshot is the point in time Incus promises, config included, unlike
 	// vm-snapshot.revert's disk-only semantics for a tenant's own request (resource/vmsnapshot/revert.go).
 	if err := p.UpdateInstance(ctx, project, name, api.InstancePut{Restore: backup.SnapshotName}, ""); err != nil {
-		return err
+		return fmt.Errorf("roll vm %s back to %q: %w", name, backup.SnapshotName, err)
 	}
-	return p.DeleteInstanceSnapshot(ctx, project, name, backup.SnapshotName)
+	if err := p.DeleteInstanceSnapshot(ctx, project, name, backup.SnapshotName); err != nil {
+		return fmt.Errorf("delete the %q snapshot of vm %s: %w", backup.SnapshotName, name, err)
+	}
+	return nil
 }
 
 // pinIpv4 sets the VM's NIC (eth0) to the IPv4 OVN's DHCP gave it when the backup was taken. OVN otherwise hands out
