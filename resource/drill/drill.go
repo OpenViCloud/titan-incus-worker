@@ -78,7 +78,7 @@ func (h *Drill) Run(ctx context.Context, leased command.Leased, logger *slog.Log
 		return err
 	}
 	p, storagePool := cl.Provider, provider.StoragePoolOrDefault(cl.StoragePool)
-	logger = logger.With("kind", in.Kind, "resource", in.ExternalId)
+	logger = logger.With("resourceKind", in.Kind, "resource", in.ExternalId)
 
 	// Any leftover of an earlier run goes first: a project it died in holds pool space this run is about to measure.
 	if err := removeLeftovers(ctx, p, storagePool, logger); err != nil {
