@@ -510,4 +510,8 @@ func TestRun_TheLineThatStartsADrill_CarriesTheResourcesName(t *testing.T) {
 	if len(started) != 1 || started[0]["name"] != "web-1" || started[0]["project"] != drillName {
 		t.Fatalf("start lines: %+v", started)
 	}
+	// The command loop's own `kind` attribute is the command kind: the drill's resource kind must not repeat the key.
+	if started[0]["resourceKind"] != "vm" {
+		t.Fatalf("resourceKind of the start line: %+v", started[0])
+	}
 }
