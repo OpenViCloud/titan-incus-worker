@@ -187,7 +187,7 @@ func leased(payload map[string]any) command.Leased {
 }
 
 func vmLeased() command.Leased {
-	return leased(map[string]any{"kind": "vm", "resourceId": vmId, "externalId": vmName, "projectName": tenant, "tenantId": tenantId})
+	return leased(map[string]any{"kind": "vm", "resourceId": vmId, "externalId": vmName, "name": "web-1", "projectName": tenant, "tenantId": tenantId})
 }
 
 func volumeLeased() command.Leased {
@@ -494,5 +494,20 @@ func TestGiveUp_RemovesTheDrillProjects_AndNoTenantProject(t *testing.T) {
 	}
 	if !slices.Equal(s.provider.DeletedProjects, []string{"drill-20261123"}) {
 		t.Errorf("deleted %v, want only the drill project", s.provider.DeletedProjects)
+	}
+}
+
+// A drill is found in the log by the name a customer gave the VM, not only by its Incus name.
+func TestRun_TheLineThatStartsADrill_CarriesTheResourcesName(t *testing.T) {
+	s := newScene()
+	logger, capture := testsupport.NewLogCapture(t)
+
+	if err := s.drill.Run(context.Background(), vmLeased(), logger); err != nil {
+		t.Fatal(err)
+	}
+
+	started := capture.Records("restore drill started")
+	if len(started) != 1 || started[0]["name"] != "web-1" || started[0]["project"] != drillName {
+		t.Fatalf("start lines: %+v", started)
 	}
 }

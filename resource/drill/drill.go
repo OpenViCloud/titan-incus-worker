@@ -40,9 +40,11 @@ const (
 // payload mirrors ProviderCommandQueue.EnqueueRestoreDrillAsync. The worker reads the VM's devices from Incus to know
 // the networks and volumes the archive names; it has no database.
 type payload struct {
-	Kind        string `json:"kind"`
-	ResourceId  string `json:"resourceId"`
-	ExternalId  string `json:"externalId"`
+	Kind       string `json:"kind"`
+	ResourceId string `json:"resourceId"`
+	ExternalId string `json:"externalId"`
+	// Name is the resource's name in Titan: the log line that starts a drill carries it, so a drill is found by the name a customer gave.
+	Name        string `json:"name"`
 	ProjectName string `json:"projectName"`
 	TenantId    string `json:"tenantId"`
 }
@@ -110,7 +112,7 @@ func (h *Drill) Run(ctx context.Context, leased command.Leased, logger *slog.Log
 		return command.Permanent(fmt.Errorf("create project %s: %w", project, err))
 	}
 	made.created = true
-	logger.Info("restore drill started", "project", project, "disks", len(plan.volumes)+1)
+	logger.Info("restore drill started", "project", project, "name", in.Name, "disks", len(plan.volumes)+1)
 
 	for _, network := range plan.networks {
 		if err := p.CreateNetwork(ctx, project, networkOf(network)); err != nil {
