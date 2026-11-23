@@ -45,6 +45,21 @@ func VolumeName(volumeId string) (string, error) {
 	return objectName(volumePrefix, volumeId)
 }
 
+// VolumeIdFromName is the Titan id (a UUID) a volume name was made from; a drill finds a VM's attached volumes by the
+// device's source name and needs their ids to find their archives.
+func VolumeIdFromName(name string) (string, error) {
+	encoded, hasPrefix := strings.CutPrefix(name, volumePrefix)
+	if !hasPrefix {
+		return "", fmt.Errorf("%q is not a Titan volume name", name)
+	}
+	bytes, err := lowerBase32.DecodeString(encoded)
+	if err != nil || len(bytes) != 16 {
+		return "", fmt.Errorf("%q is not a Titan volume name", name)
+	}
+	hexDigits := hex.EncodeToString(bytes)
+	return hexDigits[0:8] + "-" + hexDigits[8:12] + "-" + hexDigits[12:16] + "-" + hexDigits[16:20] + "-" + hexDigits[20:], nil
+}
+
 // SnapshotName names a snapshot of an instance or of a volume; it is unique under its parent.
 func SnapshotName(snapshotId string) (string, error) {
 	return objectName(snapshotPrefix, snapshotId)

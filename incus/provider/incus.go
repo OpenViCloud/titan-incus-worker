@@ -52,6 +52,21 @@ func (p *Incus) CreateProject(ctx context.Context, project api.ProjectsPost) err
 	return nil
 }
 
+func (p *Incus) DeleteProject(ctx context.Context, name string) error {
+	if err := p.server.DeleteProject(name); err != nil {
+		return fmt.Errorf("delete project %s: %w", name, err)
+	}
+	return nil
+}
+
+func (p *Incus) GetStoragePoolResources(ctx context.Context, pool string) (*api.ResourcesStoragePool, error) {
+	resources, err := p.server.GetStoragePoolResources(pool)
+	if err != nil {
+		return nil, fmt.Errorf("get the resources of storage pool %s: %w", pool, err)
+	}
+	return resources, nil
+}
+
 func (p *Incus) CreateProfile(ctx context.Context, project string, profile api.ProfilesPost) error {
 	if err := p.server.UseProject(project).CreateProfile(profile); err != nil {
 		return fmt.Errorf("create profile %s in project %s: %w", profile.Name, project, err)

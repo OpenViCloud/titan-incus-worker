@@ -10,6 +10,7 @@ import (
 
 	"github.com/OpenViCloud/titan-incus-worker/incus/cluster"
 	"github.com/OpenViCloud/titan-incus-worker/loop/reconcile"
+	"github.com/OpenViCloud/titan-incus-worker/resource/backup"
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
 
@@ -64,15 +65,15 @@ type namedRunner string
 
 func (namedRunner) Run(context.Context) {}
 
-// The command pod leases (customer commands and backups) and sends no reconcile report; the inventory pod only
+// The command pod leases (customer commands, backups and restore drills) and sends no reconcile report; the inventory pod only
 // reconciles and reads metrics, so each cluster is read once per cycle however many command pods run
 // (titan-ops architecture/worker-structure.md#worker-roles).
 func TestLoopsOf_EachRole_RunsItsLoopsOnly(t *testing.T) {
-	all := loops{commands: namedRunner("commands"), backups: namedRunner("backups"),
+	all := loops{commands: namedRunner("commands"), backups: namedRunner("backups"), drills: namedRunner("drills"),
 		reconciler: namedRunner("reconciler"), metrics: namedRunner("metrics")}
 	want := map[role]string{
-		roleAll:       "commands,backups,reconciler,metrics",
-		roleCommands:  "commands,backups",
+		roleAll:       "commands,backups,drills,reconciler,metrics",
+		roleCommands:  "commands,backups,drills",
 		roleInventory: "reconciler,metrics",
 	}
 
@@ -84,5 +85,30 @@ func TestLoopsOf_EachRole_RunsItsLoopsOnly(t *testing.T) {
 		if strings.Join(got, ",") != names {
 			t.Errorf("%s runs %v, want %s", role, got, names)
 		}
+	}
+}
+
+// Each of the three lease loops leases its own kinds: a drill holds its loop for as long as it imports a disk, so it
+// shares a loop with neither a tenant's command nor a backup (titan-ops features/backup/design.md#restore-drill).
+func TestSplitRoutes_BackupsAndDrills_LeaveTheTenantLoop_EachOnItsOwn(t *testing.T) {
+	all := routes(nil, cluster.Fixed{}, "", backup.Target{})
+
+	tenant, backups, drills := splitRoutes(all)
+
+	for _, kind := range backupKinds {
+		if _, ok := backups[kind]; !ok || tenant[kind].Handler != nil || drills[kind].Handler != nil {
+			t.Errorf("%s is not on the backup loop alone", kind)
+		}
+	}
+	for _, kind := range drillKinds {
+		if _, ok := drills[kind]; !ok || tenant[kind].Handler != nil || backups[kind].Handler != nil {
+			t.Errorf("%s is not on the drill loop alone", kind)
+		}
+	}
+	if _, ok := tenant["vm.create"]; !ok {
+		t.Error("vm.create left the tenant loop")
+	}
+	if len(drills) != 1 || drills["restore.drill"].Timeout != drillTimeout {
+		t.Errorf("drill routes %+v, want restore.drill alone with the drill timeout", drills)
 	}
 }

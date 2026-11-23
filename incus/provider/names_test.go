@@ -111,3 +111,18 @@ func TestIsInstanceName_IsVmAndTwentySixBase32Characters(t *testing.T) {
 		}
 	}
 }
+
+func TestVolumeIdFromName_IsTheInverseOfVolumeName_AndRefusesWhatIsNotOne(t *testing.T) {
+	name, _ := VolumeName(someId)
+
+	got, err := VolumeIdFromName(name)
+
+	if err != nil || got != someId {
+		t.Fatalf("got %q, %v; want %q", got, err, someId)
+	}
+	for _, notOurs := range []string{"", "vm" + name[len("vol"):], "volshort", "vol" + strings.Repeat("!", 26), "tpl-x"} {
+		if id, err := VolumeIdFromName(notOurs); err == nil {
+			t.Errorf("%q gave id %q, want an error", notOurs, id)
+		}
+	}
+}

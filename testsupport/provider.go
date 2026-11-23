@@ -56,8 +56,13 @@ type Provider struct {
 
 	Projects map[string]bool
 	// Profiles is keyed by project.
-	Profiles        map[string][]api.Profile
-	CreatedProjects []api.ProjectsPost
+	Profiles         map[string][]api.Profile
+	CreatedProjects  []api.ProjectsPost
+	DeletedProjects  []string
+	DeleteProjectErr error
+	// PoolSpace is what GetStoragePoolResources answers, in bytes, unless PoolResourcesErr is set.
+	PoolSpace        api.ResourcesStoragePoolSpace
+	PoolResourcesErr error
 
 	Instances         map[string]*api.Instance // key: project + "/" + name
 	CreatedInstances  []api.InstancesPost
@@ -322,6 +327,25 @@ func (p *Provider) CreateProject(ctx context.Context, project api.ProjectsPost) 
 	p.CreatedProjects = append(p.CreatedProjects, project)
 	p.Projects[project.Name] = true
 	return nil
+}
+
+func (p *Provider) DeleteProject(ctx context.Context, name string) error {
+	p.count()
+	p.DeletedProjects = append(p.DeletedProjects, name)
+	p.Order = append(p.Order, "delete-project "+name)
+	if p.DeleteProjectErr != nil {
+		return p.DeleteProjectErr
+	}
+	delete(p.Projects, name)
+	return nil
+}
+
+func (p *Provider) GetStoragePoolResources(ctx context.Context, pool string) (*api.ResourcesStoragePool, error) {
+	p.count()
+	if p.PoolResourcesErr != nil {
+		return nil, p.PoolResourcesErr
+	}
+	return &api.ResourcesStoragePool{Space: p.PoolSpace}, nil
 }
 
 func (p *Provider) GetInstance(ctx context.Context, project string, name string) (*api.Instance, error) {
