@@ -30,6 +30,10 @@ var resourceEdgeAllowlist = map[string]string{
 	"resource/restore -> resource/backup":     "the restore reads the object keys, the backup snapshot's name and the config YAML the backup writes",
 	"resource/drill -> resource/backup":       "the drill finds an archive by the object key the backup writes and reads the layout of its time",
 	"resource/drill -> resource/restore":      "the drill runs the restore's own import steps on a VM or volume, so what it verifies is what a restore does",
+	"resource/volume -> resource/restore":     "volume.restore imports one archive as a volume of its own with the restore's import steps, its pool-room rule, its finish marker and its bucket port",
+	"resource/volume -> resource/backup":      "volume.restore builds the archive's object key as the backup wrote it, from the layout of its time",
+	"resource/vm -> resource/restore":         "vm.restore imports one archive as a VM of its own with the restore's import steps, its archive index, its pool-room rule, its finish marker and its bucket port",
+	"resource/vm -> resource/backup":          "vm.restore builds the archive's object key as the backup wrote it, from the layout of its time",
 }
 
 // Resources implement loop/command's Handler; the reconcile loop calls them, never the other way round.

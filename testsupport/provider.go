@@ -2,6 +2,7 @@ package testsupport
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -11,22 +12,34 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/lxc/incus/v7/shared/api"
+	"go.yaml.in/yaml/v4"
 
 	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 )
 
-// ArchiveDescription is what a test writes as the whole content of a fake backup archive: one line per snapshot the
-// archive carries ("backup" among them for a well-formed one, absent for an old-format archive). ImportInstance and
-// ImportVolume read it instead of unpacking a real tar.gz, so a test describes an archive's snapshots without building
-// one. A blank line is ignored, so a trailing newline is harmless.
+// ArchiveDescription is what a test says a fake backup archive holds. It has two forms as bytes, and ImportInstance and
+// ImportVolume read either:
+//   - ArchiveBody: one line per snapshot the archive carries ("backup" among them for a well-formed one, absent for an
+//     old-format archive), for a test whose code only hands the archive to Incus. A blank line is ignored, so a
+//     trailing newline is harmless.
+//   - TarGz: a gzipped tar that opens on backup/index.yaml, as Incus writes one, for a test whose code reads the index
+//     too. Only this form carries Name, Type, Devices and Config.
 type ArchiveDescription struct {
 	Snapshots []string
+	// Name is the Incus name of the instance or volume the archive was taken of.
+	Name string
+	// Type is "virtual-machine" when left empty; a volume's archive says "custom".
+	Type string
+	// Devices and Config are the archived instance's own (config.container of the index).
+	Devices map[string]map[string]string
+	Config  map[string]string
 }
 
 // ArchiveBody is the fake archive body a test gives a fake bucket object: ImportInstance/ImportVolume parse it back.
@@ -34,15 +47,100 @@ func ArchiveBody(snapshots ...string) string {
 	return strings.Join(snapshots, "\n")
 }
 
-func parseArchiveDescription(body string) ArchiveDescription {
+const archiveIndexPath = "backup/index.yaml"
+
+// archiveIndex is the part of backup/index.yaml the fake import reads.
+type archiveIndex struct {
+	Name      string   `yaml:"name"`
+	Type      string   `yaml:"type"`
+	Snapshots []string `yaml:"snapshots"`
+	Config    struct {
+		Container *archivedInstance `yaml:"container,omitempty"`
+	} `yaml:"config"`
+}
+
+type archivedInstance struct {
+	Config  map[string]string            `yaml:"config"`
+	Devices map[string]map[string]string `yaml:"devices"`
+}
+
+// TarGz is the archive as real bytes: a gzipped tar whose only entry is backup/index.yaml, the first entry of an
+// archive Incus writes. The fake import reads the same index a handler does, so one description feeds both.
+func (d ArchiveDescription) TarGz() string {
+	index := archiveIndex{Name: d.Name, Type: d.Type, Snapshots: d.Snapshots}
+	if index.Type == "" {
+		index.Type = string(api.InstanceTypeVM)
+	}
+	if d.Devices != nil || d.Config != nil {
+		index.Config.Container = &archivedInstance{Config: d.Config, Devices: d.Devices}
+	}
+	content, err := yaml.Marshal(index)
+	if err != nil {
+		panic(fmt.Sprintf("encode the index of a fake archive: %v", err))
+	}
+	var archive bytes.Buffer
+	zipped := gzip.NewWriter(&archive)
+	packed := tar.NewWriter(zipped)
+	header := &tar.Header{Name: archiveIndexPath, Mode: 0o644, Size: int64(len(content))}
+	if err := packed.WriteHeader(header); err != nil {
+		panic(fmt.Sprintf("write a fake archive: %v", err))
+	}
+	if _, err := packed.Write(content); err != nil {
+		panic(fmt.Sprintf("write a fake archive: %v", err))
+	}
+	if err := packed.Close(); err != nil {
+		panic(fmt.Sprintf("write a fake archive: %v", err))
+	}
+	if err := zipped.Close(); err != nil {
+		panic(fmt.Sprintf("write a fake archive: %v", err))
+	}
+	return archive.String()
+}
+
+var gzipMagic = []byte{0x1f, 0x8b}
+
+// parseArchiveDescription reads either form: gzip bytes are a TarGz archive, anything else a snapshot list.
+func parseArchiveDescription(body []byte) (ArchiveDescription, error) {
+	if bytes.HasPrefix(body, gzipMagic) {
+		return parseArchiveIndex(body)
+	}
 	description := ArchiveDescription{}
-	for _, line := range strings.Split(body, "\n") {
+	for _, line := range strings.Split(string(body), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed != "" {
 			description.Snapshots = append(description.Snapshots, trimmed)
 		}
 	}
-	return description
+	return description, nil
+}
+
+func parseArchiveIndex(body []byte) (ArchiveDescription, error) {
+	unzipped, err := gzip.NewReader(bytes.NewReader(body))
+	if err != nil {
+		return ArchiveDescription{}, fmt.Errorf("fake archive is not gzip: %w", err)
+	}
+	packed := tar.NewReader(unzipped)
+	header, err := packed.Next()
+	if err != nil {
+		return ArchiveDescription{}, fmt.Errorf("fake archive is not a tar: %w", err)
+	}
+	if header.Name != archiveIndexPath {
+		return ArchiveDescription{}, fmt.Errorf("fake archive opens on %q, not %s", header.Name, archiveIndexPath)
+	}
+	content, err := io.ReadAll(packed)
+	if err != nil {
+		return ArchiveDescription{}, err
+	}
+	var index archiveIndex
+	if err := yaml.Unmarshal(content, &index); err != nil {
+		return ArchiveDescription{}, fmt.Errorf("decode the index of a fake archive: %w", err)
+	}
+	description := ArchiveDescription{Name: index.Name, Type: index.Type, Snapshots: index.Snapshots}
+	if index.Config.Container != nil {
+		description.Devices = index.Config.Container.Devices
+		description.Config = index.Config.Container.Config
+	}
+	return description, nil
 }
 
 // Provider is an in-memory provider.Provider. Errors set on it are returned by the matching call; every call is
@@ -63,8 +161,18 @@ type Provider struct {
 	// PoolSpace is what GetStoragePoolResources answers, in bytes, unless PoolResourcesErr is set.
 	PoolSpace        api.ResourcesStoragePoolSpace
 	PoolResourcesErr error
+	// Pools is the storage pool each call that names one was given, in call order. The fake holds its volumes by project
+	// and name alone, so a call that names the wrong pool is answered like any other: a test reads here that none did.
+	Pools []string
+	// RunningOperations holds the operations Incus has not finished, keyed by what each names: project + "/" + the
+	// instance's or the volume's name. ListRunningInstanceOperations and ListRunningVolumeOperations answer from it,
+	// unless ListOperationsErr is set.
+	RunningOperations map[string][]api.Operation
+	ListOperationsErr error
 
-	Instances         map[string]*api.Instance // key: project + "/" + name
+	Instances map[string]*api.Instance // key: project + "/" + name
+	// GetInstanceErr fails every GetInstance and GetInstanceWithEtag.
+	GetInstanceErr    error
 	CreatedInstances  []api.InstancesPost
 	CreateInstanceErr error
 	StateChanges      []api.InstanceStatePut
@@ -141,6 +249,9 @@ type Provider struct {
 	ListInstanceSnapshotsErr error
 	Volumes                  map[string]*api.StorageVolume // key: project + "/" + name
 	GetVolumeErr             error
+	// PatchedVolumeConfigs records each PatchVolumeConfig call, one that failed included.
+	PatchedVolumeConfigs []VolumeConfigPatch
+	PatchVolumeConfigErr error
 	// AfterUpdateInstance runs after each recorded UpdateInstance: a test makes the fake follow what Incus would
 	// change, such as a volume's used_by once its disk device is gone.
 	AfterUpdateInstance func()
@@ -186,10 +297,10 @@ type Provider struct {
 	CreateProfileErr error
 	UpdatedProfiles  []ProfileUpdate
 	UpdateProfileErr error
-	// ImportedInstances/ImportedVolumes record each ImportInstance/ImportVolume call, archive body included so a test
-	// tells which archive was used. ImportInstance/ImportVolume decode the body as testsupport.ArchiveDescription
-	// (see parseArchiveDescription) and create the instance/volume with the snapshots it names, as Incus's own import
-	// would from a real tar.gz.
+	// ImportedInstances/ImportedVolumes record each ImportInstance/ImportVolume call, one that failed included: the
+	// archive body, so a test tells which archive was used, and an instance's overrides. ImportInstance/ImportVolume
+	// decode the body as testsupport.ArchiveDescription (see parseArchiveDescription) and create the instance/volume
+	// with the snapshots it names, as Incus's own import would from a real tar.gz.
 	ImportedInstances []InstanceImport
 	ImportInstanceErr error
 	ImportedVolumes   []VolumeImport
@@ -200,6 +311,8 @@ type Provider struct {
 	// Metrics is the OpenMetrics text GetMetrics answers, unless GetMetricsErr is set.
 	Metrics       string
 	GetMetricsErr error
+	// madeValues counts the volatile values an import made, so no two are alike.
+	madeValues int
 }
 
 type InstanceBackup struct {
@@ -222,10 +335,18 @@ type ProfileUpdate struct {
 }
 
 type InstanceImport struct {
+	Project   string
+	Pool      string
+	Name      string
+	Body      string
+	Overrides provider.InstanceOverrides
+}
+
+type VolumeConfigPatch struct {
 	Project string
 	Pool    string
 	Name    string
-	Body    string
+	Config  map[string]string
 }
 
 type VolumeImport struct {
@@ -246,6 +367,7 @@ func NewProvider() *Provider {
 		Leases:             map[string][]api.NetworkLease{},
 		Volumes:            map[string]*api.StorageVolume{},
 		VolumeSnapshots:    map[string]bool{},
+		RunningOperations:  map[string][]api.Operation{},
 		Aliases:            map[string]bool{},
 		ACLs:               map[string]*api.NetworkACL{},
 		LoadBalancers:      map[string]*api.NetworkLoadBalancer{},
@@ -268,6 +390,14 @@ func NotFound(message string) error {
 func (p *Provider) count() {
 	p.mu.Lock()
 	p.Calls++
+	p.mu.Unlock()
+}
+
+// countIn counts a call that names a storage pool, and keeps the pool.
+func (p *Provider) countIn(pool string) {
+	p.mu.Lock()
+	p.Calls++
+	p.Pools = append(p.Pools, pool)
 	p.mu.Unlock()
 }
 
@@ -341,7 +471,7 @@ func (p *Provider) DeleteProject(ctx context.Context, name string) error {
 }
 
 func (p *Provider) GetStoragePoolResources(ctx context.Context, pool string) (*api.ResourcesStoragePool, error) {
-	p.count()
+	p.countIn(pool)
 	if p.PoolResourcesErr != nil {
 		return nil, p.PoolResourcesErr
 	}
@@ -354,25 +484,34 @@ func (p *Provider) GetInstance(ctx context.Context, project string, name string)
 }
 
 // GetInstanceWithEtag answers a copy of the devices and config, as Incus answers a fresh body: a handler editing them
-// changes nothing here.
+// changes nothing here. Neither map is nil, as in a body Incus sends.
 func (p *Provider) GetInstanceWithEtag(ctx context.Context, project string, name string) (*api.Instance, string, error) {
 	p.count()
+	if p.GetInstanceErr != nil {
+		return nil, "", p.GetInstanceErr
+	}
 	key := project + "/" + name
 	instance, found := p.Instances[key]
 	if !found {
 		return nil, "", NotFound("Instance not found")
 	}
 	copied := *instance
-	copied.Config = maps.Clone(instance.Config)
-	copied.Devices = map[string]map[string]string{}
-	for device, settings := range instance.Devices {
-		copied.Devices[device] = maps.Clone(settings)
-	}
+	copied.Config = map[string]string{}
+	maps.Copy(copied.Config, instance.Config)
+	copied.Devices = cloneDevices(instance.Devices)
 	etag := strconv.Itoa(p.instanceVersions[key])
 	if p.AfterGetInstance != nil {
 		p.AfterGetInstance()
 	}
 	return &copied, etag, nil
+}
+
+func cloneDevices(devices map[string]map[string]string) map[string]map[string]string {
+	cloned := map[string]map[string]string{}
+	for device, settings := range devices {
+		cloned[device] = maps.Clone(settings)
+	}
+	return cloned
 }
 
 // WriteInstance changes an instance's devices as another writer would, so its ETag changes.
@@ -730,15 +869,32 @@ func (p *Provider) DeleteImage(ctx context.Context, fingerprint string) error {
 	return nil
 }
 
+// PatchInstance merges into an instance the fake holds as Incus's PATCH does: each device named replaces that device
+// whole, each config key named is set, the rest stays. An instance the fake does not hold is only recorded.
 func (p *Provider) PatchInstance(ctx context.Context, project string, name string, instance api.InstancePut) error {
 	p.count()
+	key := project + "/" + name
 	if p.PatchInstanceErr == nil {
-		p.instanceVersions[project+"/"+name]++
+		p.instanceVersions[key]++
+		if stored, found := p.Instances[key]; found {
+			if stored.Devices == nil {
+				stored.Devices = map[string]map[string]string{}
+			}
+			maps.Copy(stored.Devices, cloneDevices(instance.Devices))
+			if stored.Config == nil {
+				stored.Config = map[string]string{}
+			}
+			maps.Copy(stored.Config, instance.Config)
+		}
 	}
 	p.PatchedInstances = append(p.PatchedInstances, instance)
 	return p.PatchInstanceErr
 }
 
+// UpdateInstance replaces the writable part of an instance the fake holds, so the next read sees the write. A rollback
+// (Restore set) is recorded and leaves the devices and config as they are, which is what a disk-only one does on
+// Incus; a full rollback's return to the snapshot's devices and config is not played. An instance the fake does not
+// hold is only recorded.
 func (p *Provider) UpdateInstance(ctx context.Context, project string, name string, instance api.InstancePut, etag string) error {
 	p.count()
 	key := project + "/" + name
@@ -747,6 +903,13 @@ func (p *Provider) UpdateInstance(ctx context.Context, project string, name stri
 	}
 	if p.UpdateInstanceErr == nil {
 		p.instanceVersions[key]++
+		stored, found := p.Instances[key]
+		isRollback := instance.Restore != ""
+		if found && !isRollback {
+			stored.InstancePut = instance
+			stored.Devices = cloneDevices(instance.Devices)
+			stored.Config = maps.Clone(instance.Config)
+		}
 	}
 	p.UpdatedInstances = append(p.UpdatedInstances, instance)
 	if p.AfterUpdateInstance != nil {
@@ -786,7 +949,7 @@ func (p *Provider) GetInstanceSnapshot(ctx context.Context, project string, inst
 }
 
 // ListInstanceSnapshots names each snapshot bare, as Incus does for instance snapshots (unlike a volume's, which Incus
-// names "<volume>/<snapshot>").
+// names "<volume>/<snapshot>"), in the order of their names: a list a test can assert the order of.
 func (p *Provider) ListInstanceSnapshots(ctx context.Context, project string, instance string) ([]api.InstanceSnapshot, error) {
 	p.count()
 	if p.ListInstanceSnapshotsErr != nil {
@@ -794,7 +957,7 @@ func (p *Provider) ListInstanceSnapshots(ctx context.Context, project string, in
 	}
 	prefix := project + "/" + instance + "/"
 	snapshots := []api.InstanceSnapshot{}
-	for key := range p.InstanceSnapshots {
+	for _, key := range slices.Sorted(maps.Keys(p.InstanceSnapshots)) {
 		if strings.HasPrefix(key, prefix) {
 			name := strings.TrimPrefix(key, prefix)
 			snapshots = append(snapshots, api.InstanceSnapshot{Name: name, Devices: p.SnapshotDevices[key]})
@@ -861,7 +1024,7 @@ func (p *Provider) CreateInstanceDirectory(ctx context.Context, project string, 
 }
 
 func (p *Provider) GetVolume(ctx context.Context, project string, pool string, name string) (*api.StorageVolume, error) {
-	p.count()
+	p.countIn(pool)
 	if p.GetVolumeErr != nil {
 		return nil, p.GetVolumeErr
 	}
@@ -872,33 +1035,75 @@ func (p *Provider) GetVolume(ctx context.Context, project string, pool string, n
 	return volume, nil
 }
 
+// CreateVolume records the call, then answers 409 to a name the project already has, as Incus does (lab-storage 02).
 func (p *Provider) CreateVolume(ctx context.Context, project string, pool string, volume api.StorageVolumesPost) error {
-	p.count()
+	p.countIn(pool)
 	p.CreatedVolumes = append(p.CreatedVolumes, volume)
 	if p.CreateVolumeErr != nil {
 		return p.CreateVolumeErr
+	}
+	if _, exists := p.Volumes[project+"/"+volume.Name]; exists {
+		return api.StatusErrorf(http.StatusConflict, "Volume by that name already exists")
 	}
 	p.Volumes[project+"/"+volume.Name] = &api.StorageVolume{Name: volume.Name, Type: "custom", Project: project}
 	return nil
 }
 
-func (p *Provider) DeleteVolume(ctx context.Context, project string, pool string, name string) error {
-	p.count()
-	p.DeletedVolumes = append(p.DeletedVolumes, project+"/"+name)
-	if p.DeleteVolumeErr == nil {
-		p.BackupOrder = append(p.BackupOrder, "delete-volume "+project+"/"+name)
-		delete(p.Volumes, project+"/"+name)
+func (p *Provider) PatchVolumeConfig(ctx context.Context, project string, pool string, name string, config map[string]string) error {
+	p.countIn(pool)
+	p.PatchedVolumeConfigs = append(p.PatchedVolumeConfigs, VolumeConfigPatch{Project: project, Pool: pool, Name: name, Config: maps.Clone(config)})
+	if p.PatchVolumeConfigErr != nil {
+		return p.PatchVolumeConfigErr
 	}
-	return p.DeleteVolumeErr
+	volume, found := p.Volumes[project+"/"+name]
+	if !found {
+		return NotFound("Storage pool volume not found")
+	}
+	if volume.Config == nil {
+		volume.Config = map[string]string{}
+	}
+	maps.Copy(volume.Config, config)
+	return nil
+}
+
+// DeleteVolume records the call, then refuses a volume an instance of the project has as a disk, as Incus does (400,
+// lab-storage 04).
+func (p *Provider) DeleteVolume(ctx context.Context, project string, pool string, name string) error {
+	p.countIn(pool)
+	p.DeletedVolumes = append(p.DeletedVolumes, project+"/"+name)
+	if p.DeleteVolumeErr != nil {
+		return p.DeleteVolumeErr
+	}
+	if p.isAttached(project, name) {
+		return api.StatusErrorf(http.StatusBadRequest, "The storage volume is still in use")
+	}
+	p.BackupOrder = append(p.BackupOrder, "delete-volume "+project+"/"+name)
+	delete(p.Volumes, project+"/"+name)
+	return nil
+}
+
+// isAttached says whether an instance of the project has the volume as a disk device of its own.
+func (p *Provider) isAttached(project string, volume string) bool {
+	for key, instance := range p.Instances {
+		if !strings.HasPrefix(key, project+"/") {
+			continue
+		}
+		for _, device := range instance.Devices {
+			if device["type"] == "disk" && device["source"] == volume {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (p *Provider) ListVolumesAllProjects(ctx context.Context, pool string) ([]api.StorageVolume, error) {
-	p.count()
+	p.countIn(pool)
 	return p.AllVolumes, p.ListVolumesErr
 }
 
 func (p *Provider) CreateVolumeSnapshot(ctx context.Context, project string, pool string, volume string, snapshot string) error {
-	p.count()
+	p.countIn(pool)
 	p.CreatedVolumeSnapshots = append(p.CreatedVolumeSnapshots, project+"/"+volume+"/"+snapshot)
 	if p.CreateSnapshotErr != nil {
 		return p.CreateSnapshotErr
@@ -909,7 +1114,7 @@ func (p *Provider) CreateVolumeSnapshot(ctx context.Context, project string, poo
 }
 
 func (p *Provider) DeleteVolumeSnapshot(ctx context.Context, project string, pool string, volume string, snapshot string) error {
-	p.count()
+	p.countIn(pool)
 	p.DeletedVolumeSnapshots = append(p.DeletedVolumeSnapshots, project+"/"+volume+"/"+snapshot)
 	if p.DeleteSnapshotErr == nil {
 		p.BackupOrder = append(p.BackupOrder, "delete-volume-snapshot "+project+"/"+volume+"/"+snapshot)
@@ -918,20 +1123,39 @@ func (p *Provider) DeleteVolumeSnapshot(ctx context.Context, project string, poo
 	return p.DeleteSnapshotErr
 }
 
-// ListVolumeSnapshots names each snapshot "<volume>/<snapshot>", as Incus lists them (lab-storage 03).
+// ListVolumeSnapshots names each snapshot "<volume>/<snapshot>", as Incus lists them (lab-storage 03), in the order
+// of their names.
 func (p *Provider) ListVolumeSnapshots(ctx context.Context, project string, pool string, volume string) ([]api.StorageVolumeSnapshot, error) {
-	p.count()
+	p.countIn(pool)
 	if p.ListVolumeSnapshotsErr != nil {
 		return nil, p.ListVolumeSnapshotsErr
 	}
 	prefix := project + "/" + volume + "/"
 	snapshots := []api.StorageVolumeSnapshot{}
-	for key := range p.VolumeSnapshots {
+	for _, key := range slices.Sorted(maps.Keys(p.VolumeSnapshots)) {
 		if strings.HasPrefix(key, prefix) {
 			snapshots = append(snapshots, api.StorageVolumeSnapshot{Name: volume + "/" + strings.TrimPrefix(key, prefix)})
 		}
 	}
 	return snapshots, nil
+}
+
+// ListRunningInstanceOperations answers what a test put in RunningOperations for the instance.
+func (p *Provider) ListRunningInstanceOperations(ctx context.Context, project string, name string) ([]api.Operation, error) {
+	p.count()
+	if p.ListOperationsErr != nil {
+		return nil, p.ListOperationsErr
+	}
+	return p.RunningOperations[project+"/"+name], nil
+}
+
+// ListRunningVolumeOperations answers what a test put in RunningOperations for the volume.
+func (p *Provider) ListRunningVolumeOperations(ctx context.Context, project string, pool string, name string) ([]api.Operation, error) {
+	p.countIn(pool)
+	if p.ListOperationsErr != nil {
+		return nil, p.ListOperationsErr
+	}
+	return p.RunningOperations[project+"/"+name], nil
 }
 
 // PutLoadBalancer places a load balancer on the fake cluster, as a test's starting state.
@@ -1025,7 +1249,7 @@ func (p *Provider) BackupInstance(ctx context.Context, project string, name stri
 }
 
 func (p *Provider) BackupVolume(ctx context.Context, project string, pool string, name string, target api.BackupTarget) error {
-	p.count()
+	p.countIn(pool)
 	p.BackupOrder = append(p.BackupOrder, "backup-volume "+project+"/"+name)
 	if p.BackupErr != nil {
 		return p.BackupErr
@@ -1034,21 +1258,42 @@ func (p *Provider) BackupVolume(ctx context.Context, project string, pool string
 	return nil
 }
 
-// ImportInstance reads backupFile whole (a test's fake archive, never a real tar.gz) and decodes it as
-// testsupport.ArchiveDescription, then creates the instance with the snapshots it names, as Incus's own import would.
-func (p *Provider) ImportInstance(ctx context.Context, project string, pool string, name string, backupFile io.Reader) error {
-	p.count()
+// importRefused is how Incus refuses an import it has received whole: its operation ("Restoring backup" for an
+// instance, "Restoring custom volume backup" for a volume) fails with this message.
+func importRefused(operation string, message string) error {
+	return &provider.OperationFailedError{Description: operation, Status: "Failure", Message: message}
+}
+
+// ImportInstance reads backupFile whole, in either form of testsupport.ArchiveDescription, and creates the instance it
+// describes, stopped, with the snapshots it names and the overrides applied, as Incus's own import would. It refuses
+// what Incus 7.0.2 was measured to refuse (titan-ops features/backup/design.md#restore-as-new-resource): a name already
+// there, a custom volume device whose volume is attached to another instance, and one whose volume is not in the project.
+func (p *Provider) ImportInstance(ctx context.Context, project string, pool string, name string, backupFile io.Reader, overrides provider.InstanceOverrides) error {
+	p.countIn(pool)
 	body, err := io.ReadAll(backupFile)
 	if err != nil {
 		return err
 	}
-	p.ImportedInstances = append(p.ImportedInstances, InstanceImport{Project: project, Pool: pool, Name: name, Body: string(body)})
+	p.ImportedInstances = append(p.ImportedInstances, InstanceImport{Project: project, Pool: pool, Name: name, Body: string(body), Overrides: overrides})
 	if p.ImportInstanceErr != nil {
 		return p.ImportInstanceErr
 	}
-	description := parseArchiveDescription(string(body))
+	description, err := parseArchiveDescription(body)
+	if err != nil {
+		return err
+	}
+	devices, config, err := p.overridden(description, overrides)
+	if err != nil {
+		return err
+	}
 	key := project + "/" + name
-	p.Instances[key] = &api.Instance{Name: name, StatusCode: api.Stopped}
+	if _, exists := p.Instances[key]; exists {
+		return importRefused("Restoring backup", "Create instance from backup: Cannot restore volume, already exists on target")
+	}
+	if err := p.checkVolumeDevices(project, devices); err != nil {
+		return err
+	}
+	p.Instances[key] = &api.Instance{Name: name, StatusCode: api.Stopped, InstancePut: api.InstancePut{Devices: devices, Config: config}}
 	for _, snapshot := range description.Snapshots {
 		p.InstanceSnapshots[key+"/"+snapshot] = true
 		p.SnapshotDevices[key+"/"+snapshot] = map[string]map[string]string{}
@@ -1056,8 +1301,84 @@ func (p *Provider) ImportInstance(ctx context.Context, project string, pool stri
 	return nil
 }
 
+// overridden is the archived instance's devices and config with the overrides applied, by the rules of Incus's import
+// (cmd/incusd/instances_post.go and api_internal.go of v7.0.1): "<device>,<key>=<value>" sets one key of one device,
+// adding the device when the archive has none of that name; "<key>=<value>" sets one config key. A key left empty is
+// not kept, except that Incus fills an empty volatile.uuid, and an empty volatile.<nic>.hwaddr of a NIC the instance
+// has, with a value of the instance's own.
+func (p *Provider) overridden(description ArchiveDescription, overrides provider.InstanceOverrides) (map[string]map[string]string, map[string]string, error) {
+	devices := cloneDevices(description.Devices)
+	config := map[string]string{}
+	maps.Copy(config, description.Config)
+	for _, entry := range overrides.Devices {
+		device, setting, hasDevice := strings.Cut(entry, ",")
+		settingKey, value, hasValue := strings.Cut(setting, "=")
+		if !hasDevice || !hasValue {
+			return nil, nil, api.StatusErrorf(http.StatusBadRequest, "Failed to parse device <device>,<key>=<value>: %q", entry)
+		}
+		if devices[device] == nil {
+			devices[device] = map[string]string{}
+		}
+		devices[device][settingKey] = value
+	}
+	for _, entry := range overrides.Config {
+		configKey, value, hasValue := strings.Cut(entry, "=")
+		if !hasValue {
+			return nil, nil, api.StatusErrorf(http.StatusBadRequest, "Failed to parse config <key>=<value>: %q", entry)
+		}
+		config[configKey] = value
+	}
+	for _, settings := range devices {
+		maps.DeleteFunc(settings, func(_ string, value string) bool { return value == "" })
+	}
+	for _, configKey := range slices.Sorted(maps.Keys(config)) {
+		if config[configKey] != "" {
+			continue
+		}
+		device, isHwaddr := strings.CutSuffix(configKey, ".hwaddr")
+		device, isVolatile := strings.CutPrefix(device, "volatile.")
+		isNicHwaddr := isHwaddr && isVolatile && devices[device]["type"] == "nic"
+		switch {
+		case configKey == "volatile.uuid":
+			p.madeValues++
+			config[configKey] = fmt.Sprintf("00000000-0000-4000-8000-%012d", p.madeValues)
+		case isNicHwaddr:
+			p.madeValues++
+			config[configKey] = fmt.Sprintf("10:66:6a:%02x:%02x:%02x", p.madeValues>>16&0xff, p.madeValues>>8&0xff, p.madeValues&0xff)
+		default:
+			delete(config, configKey)
+		}
+	}
+	return devices, config, nil
+}
+
+// checkVolumeDevices validates each custom volume device (a disk with a pool and a source) of an instance about to be
+// made in project, as Incus does when it adds the device: the volume is there, and no other instance has it. The
+// refusals are worded as the v7.0.1 source words them (cmd/incusd/instances_post.go, cmd/incusd/api_internal.go,
+// internal/server/instance/drivers/driver_common.go, internal/server/device/disk.go).
+func (p *Provider) checkVolumeDevices(project string, devices map[string]map[string]string) error {
+	for _, name := range slices.Sorted(maps.Keys(devices)) {
+		device := devices[name]
+		isVolume := device["type"] == "disk" && device["pool"] != "" && device["source"] != ""
+		if !isVolume {
+			continue
+		}
+		refusal := fmt.Sprintf("Failed importing backup: Failed creating instance record: Failed add validation for device %q: ", name)
+		if _, found := p.Volumes[project+"/"+device["source"]]; !found {
+			return importRefused("Restoring backup", refusal+"Failed loading custom volume: Storage volume not found")
+		}
+		if p.isAttached(project, device["source"]) {
+			return importRefused("Restoring backup", refusal+"Cannot add un-shared custom storage block volume to more than one instance")
+		}
+	}
+	return nil
+}
+
+// ImportVolume reads backupFile whole, in either form of testsupport.ArchiveDescription, and creates the volume with
+// the snapshots it names. A name already there is refused as Incus 7.0.2 was measured to
+// (titan-ops features/backup/design.md#restore-as-new-resource).
 func (p *Provider) ImportVolume(ctx context.Context, project string, pool string, name string, backupFile io.Reader) error {
-	p.count()
+	p.countIn(pool)
 	body, err := io.ReadAll(backupFile)
 	if err != nil {
 		return err
@@ -1066,7 +1387,13 @@ func (p *Provider) ImportVolume(ctx context.Context, project string, pool string
 	if p.ImportVolumeErr != nil {
 		return p.ImportVolumeErr
 	}
-	description := parseArchiveDescription(string(body))
+	description, err := parseArchiveDescription(body)
+	if err != nil {
+		return err
+	}
+	if _, exists := p.Volumes[project+"/"+name]; exists {
+		return importRefused("Restoring custom volume backup", fmt.Sprintf("Create custom volume from backup: Volume %q already exists in pool %q", name, pool))
+	}
 	p.Volumes[project+"/"+name] = &api.StorageVolume{Name: name, Type: "custom", Project: project}
 	for _, snapshot := range description.Snapshots {
 		p.VolumeSnapshots[project+"/"+name+"/"+snapshot] = true
@@ -1075,7 +1402,7 @@ func (p *Provider) ImportVolume(ctx context.Context, project string, pool string
 }
 
 func (p *Provider) RestoreVolume(ctx context.Context, project string, pool string, name string, snapshot string) error {
-	p.count()
+	p.countIn(pool)
 	p.RestoredVolumes = append(p.RestoredVolumes, project+"/"+name+"/"+snapshot)
 	return p.RestoreVolumeErr
 }

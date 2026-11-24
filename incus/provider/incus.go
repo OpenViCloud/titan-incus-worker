@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
+	"strings"
 
 	incus "github.com/lxc/incus/v7/client"
 	"github.com/lxc/incus/v7/shared/api"
@@ -19,6 +21,11 @@ type Incus struct {
 
 func NewIncus(server incus.InstanceServer) *Incus {
 	return &Incus{server: server}
+}
+
+// HTTPClient is the client the adapter reaches Incus with: what limits a request is set on it and on its transport.
+func (p *Incus) HTTPClient() (*http.Client, error) {
+	return p.server.GetHTTPClient()
 }
 
 func (p *Incus) GetProject(ctx context.Context, name string) (*api.Project, error) {
@@ -461,6 +468,16 @@ func (p *Incus) CreateVolume(ctx context.Context, project string, pool string, v
 	return nil
 }
 
+// PatchVolumeConfig has Incus merge config into the volume's own. The same PATCH sets the volume's description to the
+// one it carries, empty here (cmd/incusd/storage_volumes.go of v7.0.1): Titan gives a volume none.
+func (p *Incus) PatchVolumeConfig(ctx context.Context, project string, pool string, name string, config map[string]string) error {
+	patch := api.StorageVolumePut{Config: config}
+	if err := p.send(ctx, "PATCH", project, "/storage-pools/"+url.PathEscape(pool)+"/volumes/custom/"+url.PathEscape(name), patch); err != nil {
+		return fmt.Errorf("patch the config of volume %s in project %s: %w", name, project, err)
+	}
+	return nil
+}
+
 func (p *Incus) DeleteVolume(ctx context.Context, project string, pool string, name string) error {
 	if err := p.server.UseProject(project).DeleteStoragePoolVolume(pool, "custom", name); err != nil {
 		return fmt.Errorf("delete volume %s in project %s: %w", name, project, err)
@@ -554,8 +571,19 @@ func (p *Incus) BackupVolume(ctx context.Context, project string, pool string, n
 
 // ImportInstance streams the archive straight into Incus's own import; backupFile is read as the request body, never
 // held whole on the worker.
-func (p *Incus) ImportInstance(ctx context.Context, project string, pool string, name string, backupFile io.Reader) error {
+func (p *Incus) ImportInstance(ctx context.Context, project string, pool string, name string, backupFile io.Reader, overrides InstanceOverrides) error {
+	if err := checkOverrides(overrides); err != nil {
+		return fmt.Errorf("import instance %s in project %s: %w", name, project, err)
+	}
 	args := incus.InstanceBackupArgs{BackupFile: backupFile, PoolName: pool, Name: name}
+	// A list that is there but empty still makes the client send its header and ask the server for the override
+	// extension (client/incus_instances.go of v7.0.1).
+	if len(overrides.Devices) > 0 {
+		args.Devices = overrides.Devices
+	}
+	if len(overrides.Config) > 0 {
+		args.Config = overrides.Config
+	}
 	operation, err := p.server.UseProject(project).CreateInstanceFromBackup(args)
 	if err != nil {
 		return fmt.Errorf("import instance %s in project %s: %w", name, project, err)
@@ -565,6 +593,31 @@ func (p *Incus) ImportInstance(ctx context.Context, project string, pool string,
 	}
 	return nil
 }
+
+// checkOverrides refuses an entry Incus would misread. The client joins the entries with a space into one header; the
+// server splits it on spaces, wants "=" in every entry and "," in a device's, and does so only once it holds the whole
+// archive (cmd/incusd/instances_post.go of v7.0.1): a bad entry found here costs no upload.
+func checkOverrides(overrides InstanceOverrides) error {
+	for _, entry := range overrides.Devices {
+		device, setting, hasDevice := strings.Cut(entry, ",")
+		key, _, hasValue := strings.Cut(setting, "=")
+		isUsable := hasDevice && hasValue && device != "" && key != "" && !strings.ContainsAny(entry, overrideBreaks)
+		if !isUsable {
+			return fmt.Errorf("device override %q is not <device>,<key>=<value> without a space", entry)
+		}
+	}
+	for _, entry := range overrides.Config {
+		key, _, hasValue := strings.Cut(entry, "=")
+		isUsable := hasValue && key != "" && !strings.ContainsAny(entry, overrideBreaks)
+		if !isUsable {
+			return fmt.Errorf("config override %q is not <key>=<value> without a space", entry)
+		}
+	}
+	return nil
+}
+
+// overrideBreaks are the characters that end an entry in the header, or the header itself.
+const overrideBreaks = " \t\r\n"
 
 func (p *Incus) ImportVolume(ctx context.Context, project string, pool string, name string, backupFile io.Reader) error {
 	args := incus.StorageVolumeBackupArgs{BackupFile: backupFile, Name: name}
@@ -587,4 +640,53 @@ func (p *Incus) RestoreVolume(ctx context.Context, project string, pool string, 
 		return fmt.Errorf("restore volume %s to snapshot %s in project %s: %w", name, snapshot, project, err)
 	}
 	return nil
+}
+
+// ListRunningInstanceOperations and ListRunningVolumeOperations read the project's operations and keep the ones Incus
+// has not finished whose resources name the instance, or the custom volume. Read in the v7.0.1 source, not measured on
+// a server:
+//   - the import of an instance archive is an operation of class "task" described "Restoring backup", with the
+//     resources "instances": ["/1.0/instances/<name>"], the name being the one the import was given
+//     (cmd/incusd/instances_post.go);
+//   - the import of a custom volume archive is one of class "task" described "Restoring custom volume backup", with
+//     "storage_volumes": ["/1.0/storage-pools/<pool>/volumes/custom/<name>"] (cmd/incusd/storage_volumes.go);
+//   - the list gives each resource with "?project=<project>" after it, for a project other than default, and keeps
+//     an operation for five seconds after it ended (internal/server/operations/operations.go).
+//
+// Every operation that names the object counts, not the import alone: a rollback or a delete nobody waits on any
+// more is as much at work on it.
+func (p *Incus) ListRunningInstanceOperations(ctx context.Context, project string, name string) ([]api.Operation, error) {
+	return p.runningOperationsOn(project, "/1.0/instances/"+name)
+}
+
+func (p *Incus) ListRunningVolumeOperations(ctx context.Context, project string, pool string, name string) ([]api.Operation, error) {
+	return p.runningOperationsOn(project, "/1.0/storage-pools/"+pool+"/volumes/custom/"+name)
+}
+
+func (p *Incus) runningOperationsOn(project string, path string) ([]api.Operation, error) {
+	operations, err := p.server.UseProject(project).GetOperations()
+	if err != nil {
+		return nil, fmt.Errorf("list the operations of project %s: %w", project, err)
+	}
+	running := []api.Operation{}
+	for _, operation := range operations {
+		if !operation.StatusCode.IsFinal() && namesResource(operation, path) {
+			running = append(running, operation)
+		}
+	}
+	return running, nil
+}
+
+// namesResource says whether one of the operation's resources is the object at path, whatever kind Incus lists it
+// under.
+func namesResource(operation api.Operation, path string) bool {
+	for _, resources := range operation.Resources {
+		for _, resource := range resources {
+			named, err := url.Parse(resource)
+			if err == nil && named.Path == path {
+				return true
+			}
+		}
+	}
+	return false
 }

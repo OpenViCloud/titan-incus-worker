@@ -98,14 +98,14 @@ func (r *recorded) ImportVolume(ctx context.Context, project string, pool string
 	return r.Provider.ImportVolume(ctx, project, pool, name, body)
 }
 
-func (r *recorded) ImportInstance(ctx context.Context, project string, pool string, name string, body io.Reader) error {
+func (r *recorded) ImportInstance(ctx context.Context, project string, pool string, name string, body io.Reader, overrides provider.InstanceOverrides) error {
 	r.write("import-vm", project, name)
 	if r.onImportInstance != nil {
 		if err := r.onImportInstance(); err != nil {
 			return err
 		}
 	}
-	return r.Provider.ImportInstance(ctx, project, pool, name, body)
+	return r.Provider.ImportInstance(ctx, project, pool, name, body, overrides)
 }
 
 func (r *recorded) RestoreVolume(ctx context.Context, project string, pool string, name string, snapshot string) error {

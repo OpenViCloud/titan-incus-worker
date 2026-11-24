@@ -19,8 +19,8 @@ type Provider interface {
 	// DeleteProject removes an empty project: Incus refuses one that still holds an instance, volume or network. Only a
 	// restore drill's temporary project is ever deleted (titan-ops features/backup/design.md#restore-drill).
 	DeleteProject(ctx context.Context, name string) error
-	// GetStoragePoolResources answers the pool's space in bytes, as `incus storage info` does: a restore drill checks
-	// it before it imports anything.
+	// GetStoragePoolResources answers the pool's space in bytes, as `incus storage info` does: every archive import
+	// (restore.CheckPoolRoom) checks it before it imports anything.
 	GetStoragePoolResources(ctx context.Context, pool string) (*api.ResourcesStoragePool, error)
 	// ListProjects and ListProfiles read what a cluster's config backup keeps (titan-ops features/backup/design.md#cluster-backup).
 	ListProjects(ctx context.Context) ([]api.Project, error)
@@ -94,6 +94,8 @@ type Provider interface {
 	// snapshot (restore, lab-storage 03).
 	GetVolume(ctx context.Context, project string, pool string, name string) (*api.StorageVolume, error)
 	CreateVolume(ctx context.Context, project string, pool string, volume api.StorageVolumesPost) error
+	// PatchVolumeConfig sets the given keys of a custom volume's config and keeps its other keys.
+	PatchVolumeConfig(ctx context.Context, project string, pool string, name string, config map[string]string) error
 	DeleteVolume(ctx context.Context, project string, pool string, name string) error
 	// The all-projects list carries no snapshots (lab-storage 02): ListVolumeSnapshots reads them per volume.
 	ListVolumesAllProjects(ctx context.Context, pool string) ([]api.StorageVolume, error)
@@ -110,12 +112,20 @@ type Provider interface {
 
 	// ImportInstance and ImportVolume stream a backup archive straight into Incus (no byte of it held on the worker's
 	// disk), naming the instance or volume Titan's externalId and landing it on the cluster's storage pool
-	// (titan-ops features/backup/design.md#cluster-restore).
-	ImportInstance(ctx context.Context, project string, pool string, name string, backupFile io.Reader) error
+	// (titan-ops features/backup/design.md#cluster-restore). overrides change the archived instance before Incus
+	// creates it; the zero value imports it as archived.
+	ImportInstance(ctx context.Context, project string, pool string, name string, backupFile io.Reader, overrides InstanceOverrides) error
 	ImportVolume(ctx context.Context, project string, pool string, name string, backupFile io.Reader) error
 	// RestoreVolume puts the volume itself back to one of its own snapshots (StorageVolumePut.Restore), the way a
 	// restore rolls an imported volume back to its "backup" snapshot.
 	RestoreVolume(ctx context.Context, project string, pool string, name string, snapshot string) error
+	// ListRunningInstanceOperations and ListRunningVolumeOperations answer the operations Incus has not finished that
+	// name the instance, or the custom volume of that pool, in that project: none when nothing is at work on it. An
+	// import goes on in Incus after the worker stopped waiting on it, and what it has made so far may already be under
+	// the name: a restore asks before it takes what it finds there for imported, or for gone
+	// (titan-ops features/backup/design.md#restore-as-new-resource).
+	ListRunningInstanceOperations(ctx context.Context, project string, name string) ([]api.Operation, error)
+	ListRunningVolumeOperations(ctx context.Context, project string, pool string, name string) ([]api.Operation, error)
 
 	// Images and aliases live in the default project: Titan's projects have features.images=false (lab 03c).
 	GetImageAlias(ctx context.Context, name string) (*api.ImageAliasesEntry, error)
@@ -131,6 +141,15 @@ type Provider interface {
 
 	// GetMetrics answers /1.0/metrics of every project as OpenMetrics text; ParseMetrics reads it.
 	GetMetrics(ctx context.Context) (string, error)
+}
+
+// InstanceOverrides are changes Incus makes to an archived instance as it imports it: Devices entries are
+// "<device>,<key>=<value>" (one key of one device; a device the archive lacks is added), Config entries
+// "<key>=<value>". An empty value blanks the key, and Incus then gives the instance a volatile.uuid and a NIC a
+// volatile.<nic>.hwaddr of its own (titan-ops features/backup/design.md#restore-as-new-resource).
+type InstanceOverrides struct {
+	Devices []string
+	Config  []string
 }
 
 // OperationFailedError: the Incus operation finished with Failure (or Cancelled). Message is the operation's err.

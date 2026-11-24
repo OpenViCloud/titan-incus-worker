@@ -2,6 +2,7 @@ package restore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -43,10 +44,18 @@ func restoreVolumes(ctx context.Context, p provider.Provider, pool string, rows 
 	}
 }
 
+// ErrOldFormat is in the error of an import whose archive carries no backup snapshot: an archive from before backups
+// took one cannot be rolled back to the moment it was taken, and no retry changes that.
+var ErrOldFormat = errors.New("an old-format archive, not usable")
+
+func oldFormat(key string) error {
+	return fmt.Errorf("archive %s has no %q snapshot: %w", key, backup.SnapshotName, ErrOldFormat)
+}
+
 // ImportVolume streams the archive at key into Incus, checks it carries the backup snapshot (an archive without one is
 // an old-format archive this restore cannot use), then rolls the volume back to it and removes it. A restore drill runs
-// the same steps in its temporary project (titan-ops features/backup/design.md#restore-drill), so each error names its
-// step.
+// the same steps in its temporary project (titan-ops features/backup/design.md#restore-drill), and volume.restore under
+// a new name, so each error names its step.
 func ImportVolume(ctx context.Context, p provider.Provider, pool string, project string, name string, key string,
 	objects Objects, logger *slog.Logger) error {
 	body, err := objects.Get(ctx, key)
@@ -57,24 +66,38 @@ func ImportVolume(ctx context.Context, p provider.Provider, pool string, project
 	if err := p.ImportVolume(ctx, project, pool, name, body); err != nil {
 		return fmt.Errorf("import volume %s: %w", name, err)
 	}
-	has, err := hasVolumeSnapshot(ctx, p, pool, project, name, backup.SnapshotName)
+	rolledBack, err := RollBackVolume(ctx, p, pool, project, name)
 	if err != nil {
-		return fmt.Errorf("look for the %q snapshot of volume %s: %w", backup.SnapshotName, name, err)
+		return err
 	}
-	if !has {
+	if !rolledBack {
 		if deleteErr := p.DeleteVolume(ctx, project, pool, name); deleteErr != nil {
 			logger.Warn("removing an old-format archive's import failed; the next restore finds it there",
 				"project", project, "volume", name, "error", deleteErr)
 		}
-		return fmt.Errorf("archive %s has no %q snapshot: an old-format archive, not usable", key, backup.SnapshotName)
-	}
-	if err := p.RestoreVolume(ctx, project, pool, name, backup.SnapshotName); err != nil {
-		return fmt.Errorf("roll volume %s back to %q: %w", name, backup.SnapshotName, err)
-	}
-	if err := p.DeleteVolumeSnapshot(ctx, project, pool, name, backup.SnapshotName); err != nil {
-		return fmt.Errorf("delete the %q snapshot of volume %s: %w", backup.SnapshotName, name, err)
+		return oldFormat(key)
 	}
 	return nil
+}
+
+// RollBackVolume rolls an imported volume back to the backup snapshot and removes that snapshot. It answers false,
+// having written nothing, when the volume has no such snapshot: an old-format archive when the import was this run's,
+// a rollback an earlier run finished when it was not.
+func RollBackVolume(ctx context.Context, p provider.Provider, pool string, project string, name string) (bool, error) {
+	has, err := hasVolumeSnapshot(ctx, p, pool, project, name, backup.SnapshotName)
+	if err != nil {
+		return false, fmt.Errorf("look for the %q snapshot of volume %s: %w", backup.SnapshotName, name, err)
+	}
+	if !has {
+		return false, nil
+	}
+	if err := p.RestoreVolume(ctx, project, pool, name, backup.SnapshotName); err != nil {
+		return false, fmt.Errorf("roll volume %s back to %q: %w", name, backup.SnapshotName, err)
+	}
+	if err := p.DeleteVolumeSnapshot(ctx, project, pool, name, backup.SnapshotName); err != nil {
+		return false, fmt.Errorf("delete the %q snapshot of volume %s: %w", backup.SnapshotName, name, err)
+	}
+	return true, nil
 }
 
 func hasVolumeSnapshot(ctx context.Context, p provider.Provider, pool string, project string, volume string, snapshot string) (bool, error) {
@@ -166,37 +189,68 @@ func shouldStart(currentState *string) bool {
 }
 
 // ImportVm is ImportVolume's steps for a VM: import, the backup snapshot there, a full rollback to it, the snapshot
-// removed.
+// removed. Full, not disk-only: the backup snapshot is the point in time Incus promises, config included, unlike
+// vm-snapshot.revert's disk-only semantics for a tenant's own request (resource/vmsnapshot/revert.go).
 func ImportVm(ctx context.Context, p provider.Provider, pool string, project string, name string, key string,
 	objects Objects, logger *slog.Logger) error {
+	return importVm(ctx, p, pool, project, name, key, provider.InstanceOverrides{}, false, objects, logger)
+}
+
+// ImportVmWithOverrides is ImportVm for a copy that lives beside the VM its archive was taken of: Incus applies the
+// overrides as it imports, and the rollback is disk-only, because a full one puts the archived devices and volatile
+// keys back and the copy would again name the original's volumes, address and port (measured on Incus 7.0.2,
+// titan-ops features/backup/design.md#restore-as-new-resource).
+func ImportVmWithOverrides(ctx context.Context, p provider.Provider, pool string, project string, name string, key string,
+	overrides provider.InstanceOverrides, objects Objects, logger *slog.Logger) error {
+	return importVm(ctx, p, pool, project, name, key, overrides, true, objects, logger)
+}
+
+func importVm(ctx context.Context, p provider.Provider, pool string, project string, name string, key string,
+	overrides provider.InstanceOverrides, diskOnly bool, objects Objects, logger *slog.Logger) error {
 	body, err := objects.Get(ctx, key)
 	if err != nil {
 		return fmt.Errorf("read archive %s: %w", key, err)
 	}
 	defer body.Close()
-	if err := p.ImportInstance(ctx, project, pool, name, body); err != nil {
+	if err := p.ImportInstance(ctx, project, pool, name, body, overrides); err != nil {
 		return fmt.Errorf("import vm %s: %w", name, err)
 	}
-	_, err = p.GetInstanceSnapshot(ctx, project, name, backup.SnapshotName)
-	if provider.IsNotFound(err) {
+	rolledBack, err := rollBackVm(ctx, p, project, name, diskOnly)
+	if err != nil {
+		return err
+	}
+	if !rolledBack {
 		if deleteErr := p.DeleteInstance(ctx, project, name); deleteErr != nil {
 			logger.Warn("removing an old-format archive's import failed; the next restore finds it there",
 				"project", project, "vm", name, "error", deleteErr)
 		}
-		return fmt.Errorf("archive %s has no %q snapshot: an old-format archive, not usable", key, backup.SnapshotName)
-	}
-	if err != nil {
-		return fmt.Errorf("look for the %q snapshot of vm %s: %w", backup.SnapshotName, name, err)
-	}
-	// Full restore, not disk-only: the backup snapshot is the point in time Incus promises, config included, unlike
-	// vm-snapshot.revert's disk-only semantics for a tenant's own request (resource/vmsnapshot/revert.go).
-	if err := p.UpdateInstance(ctx, project, name, api.InstancePut{Restore: backup.SnapshotName}, ""); err != nil {
-		return fmt.Errorf("roll vm %s back to %q: %w", name, backup.SnapshotName, err)
-	}
-	if err := p.DeleteInstanceSnapshot(ctx, project, name, backup.SnapshotName); err != nil {
-		return fmt.Errorf("delete the %q snapshot of vm %s: %w", backup.SnapshotName, name, err)
+		return oldFormat(key)
 	}
 	return nil
+}
+
+// RollBackVmDiskOnly is RollBackVolume for a VM imported with overrides: the disk goes back to the backup snapshot,
+// the devices and config stay the import's.
+func RollBackVmDiskOnly(ctx context.Context, p provider.Provider, project string, name string) (bool, error) {
+	return rollBackVm(ctx, p, project, name, true)
+}
+
+func rollBackVm(ctx context.Context, p provider.Provider, project string, name string, diskOnly bool) (bool, error) {
+	_, err := p.GetInstanceSnapshot(ctx, project, name, backup.SnapshotName)
+	if provider.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("look for the %q snapshot of vm %s: %w", backup.SnapshotName, name, err)
+	}
+	rollback := api.InstancePut{Restore: backup.SnapshotName, DiskOnly: diskOnly}
+	if err := p.UpdateInstance(ctx, project, name, rollback, ""); err != nil {
+		return false, fmt.Errorf("roll vm %s back to %q: %w", name, backup.SnapshotName, err)
+	}
+	if err := p.DeleteInstanceSnapshot(ctx, project, name, backup.SnapshotName); err != nil {
+		return false, fmt.Errorf("delete the %q snapshot of vm %s: %w", backup.SnapshotName, name, err)
+	}
+	return true, nil
 }
 
 // pinIpv4 sets the VM's NIC (eth0) to the IPv4 OVN's DHCP gave it when the backup was taken. OVN otherwise hands out

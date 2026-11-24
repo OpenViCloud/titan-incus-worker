@@ -32,6 +32,10 @@ public static class ProviderCommandKinds
     /// above, and its row of no tenant is a lane of its own whatever side it is on (titan-ops features/backup/design.md#cluster-backup).
     public const string ClusterBackup = "cluster.backup";
 
+    /// One restore into a temporary Incus project of the cluster, of no tenant and no resource: the worker leases it on a
+    /// loop of its own, so a drill never holds back a tenant's command or a backup (titan-ops features/backup/design.md#restore-drill).
+    public const string RestoreDrill = "restore.drill";
+
     /// The kinds the worker leases on a loop of their own; a tenant's backup and its other commands are two lanes
     /// (titan-ops features/provider/design.md#tenant-lane).
     public static readonly IReadOnlyList<string> Backup = [VmBackup, VolumeBackup];

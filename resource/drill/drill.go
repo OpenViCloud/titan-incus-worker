@@ -26,12 +26,7 @@ import (
 // project (Tenant.ProjectNameFor): the cluster config backup, the reconcilers and a tenant's own lookups tell the two apart by it.
 const ProjectPrefix = "drill-"
 
-// A drill needs room for what it imports with half as much again, and a tenth of the pool beyond that, so a drill
-// never takes the pool a tenant's next write needs (measured 2026-11-23: an import grew the pool by 1.03x the root
-// disk; titan-ops features/backup/design.md#restore-drill).
 const (
-	marginDivisor    = 2
-	reserveDivisor   = 10
 	kindVm           = "vm"
 	kindVolume       = "volume"
 	cleanupTimeLimit = 15 * time.Minute
@@ -49,8 +44,9 @@ type payload struct {
 	TenantId    string `json:"tenantId"`
 }
 
-// Drill runs restore.drill. It is on a lease loop of its own: an import is as long as the upload of its disk, and
-// vm.backup must not wait behind it (titan-ops architecture/worker-structure.md#worker-roles).
+// Drill runs restore.drill. It is on the lease loop of the archive imports, away from the tenant's commands and the
+// backups: an import is as long as the upload of its disk, and vm.backup must not wait behind it
+// (titan-ops architecture/worker-structure.md#worker-roles).
 type Drill struct {
 	clusters cluster.Clusters
 	objects  restore.Objects
@@ -262,13 +258,9 @@ func (h *Drill) newestArchive(ctx context.Context, clusterId string, tenantId st
 	return best, nil
 }
 
-// checkPoolSpace refuses the drill when the pool lacks room for it: free >= 1.5 x the bytes imported + a tenth of the
-// pool. The message says what was measured.
+// checkPoolSpace refuses the drill when the pool lacks room for every disk it imports: the root disk and each
+// attached volume (restore.CheckPoolRoom has the rule).
 func checkPoolSpace(ctx context.Context, p provider.Provider, storagePool string, plan drillPlan, logger *slog.Logger) error {
-	resources, err := p.GetStoragePoolResources(ctx, storagePool)
-	if err != nil {
-		return err
-	}
 	imported := plan.root.sizeBytes
 	for _, volume := range plan.volumes {
 		imported += volume.sizeBytes
@@ -276,21 +268,7 @@ func checkPoolSpace(ctx context.Context, p provider.Provider, storagePool string
 	if imported == 0 {
 		logger.Warn("no disk size known for the drill; only the pool reserve is checked")
 	}
-	space := resources.Space
-	free := uint64(0)
-	if space.Total > space.Used {
-		free = space.Total - space.Used
-	}
-	need := uint64(imported) + uint64(imported)/marginDivisor + space.Total/reserveDivisor
-	if free < need {
-		return fmt.Errorf("pool %s has %s free, a drill of %s needs %s (1.5 x the disks + a tenth of the pool): not enough space",
-			storagePool, inGiB(free), inGiB(uint64(imported)), inGiB(need))
-	}
-	return nil
-}
-
-func inGiB(bytes uint64) string {
-	return fmt.Sprintf("%.1f GiB", float64(bytes)/float64(1<<30))
+	return restore.CheckPoolRoom(ctx, p, storagePool, imported)
 }
 
 func parseSize(text string) int64 {
