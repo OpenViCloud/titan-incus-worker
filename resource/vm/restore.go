@@ -220,9 +220,10 @@ func (h *Restore) endRefused(ctx context.Context, leased command.Leased, cause e
 // the copy's name while the copy is or may be on Incus and without it once it is known gone. The worker never starts
 // the copy, so it is deleted as it stands (a running one Incus refuses to delete); one that will not delete keeps its
 // placeholders, which Incus refuses to delete under it. Nothing removes a placeholder left here once the command is
-// over, so the line that says some are left names each. A copy this command finished is the tenant's VM, started or not: it is left as it is, only its
-// placeholders go, and the report is the Done of the run that finished it. While Incus is still at work on the copy
-// there is no report and no write: the error has the give-up come again (restore.ImportStillRunning).
+// over, so the line that says some are left names each. A copy this command finished is the tenant's VM, started or
+// not: it is left as it is, only its placeholders go, and the report is the Done of the run that finished it. While
+// Incus is still at work on the copy there is no report and no write: the error has the give-up come again
+// (restore.ImportStillRunning).
 func (h *Restore) removeImport(ctx context.Context, clusterId string, order restoreOrder, cause error, logger *slog.Logger) (requestEnd, error) {
 	project, name := order.payload.ProjectName, order.name
 	cl, err := h.clusters.Cluster(ctx, clusterId)
