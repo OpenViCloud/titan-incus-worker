@@ -1,4 +1,5 @@
-// Package testsupport holds the fakes the worker's tests share: an httptest control plane and an in-memory Provider.
+// Package testsupport holds the fakes the worker's tests share: an httptest control plane, an in-memory Provider, a
+// Recorder of the writes made on a Provider, and a Bucket.
 // Only tests import it.
 package testsupport
 

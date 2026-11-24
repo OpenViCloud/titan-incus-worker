@@ -151,9 +151,9 @@ func commandRoutes(cp *controlplane.Client, clusters cluster.Clusters, loaded co
 }
 
 // importClusters is how the import loop reaches a cluster. The client of every other loop cuts a request at two
-// minutes, and an archive import is one request as long as the upload of a whole disk: this loop's client times no
-// upload, and ends a request that has stopped moving, its upload for ten minutes or its answer ten minutes after it
-// was sent.
+// minutes, and an archive import is one request as long as the upload of a whole disk: this loop's client sets no limit
+// on the whole request, and ends one that has stopped moving, its upload for ten minutes or its answer ten minutes after
+// it was sent.
 func importClusters(cp *controlplane.Client, logger *slog.Logger) *cluster.Resolver {
 	return cluster.NewResolver(cp, cluster.ConnectIncusForImports, logger)
 }

@@ -148,7 +148,7 @@ func doneEnd(ctx context.Context, p provider.Provider, project string, name stri
 }
 
 // importCopy imports the archive under the copy's name and rolls its disk back to the moment the backup was taken.
-// Every check comes before its first write.
+// Every check that needs no import comes before its first write.
 func (h *Restore) importCopy(ctx context.Context, p provider.Provider, pool string, order restoreOrder, logger *slog.Logger) error {
 	project, name := order.payload.ProjectName, order.name
 	for _, copied := range order.copies {
@@ -173,7 +173,7 @@ func (h *Restore) importCopy(ctx context.Context, p provider.Provider, pool stri
 	logger.Info("vm restore started", "object", order.key, "source", order.payload.SourceVmId, "vm", name)
 	err = restore.ImportVmWithOverrides(ctx, p, pool, project, name, order.key, plan.overrides, h.objects, logger)
 	if errors.Is(err, restore.ErrOldFormat) {
-		// The import is removed already; the placeholders made for it go too.
+		// The import is removed, or the give-up removes it; the placeholders made for it go too.
 		if removeErr := removePlaceholders(ctx, p, pool, project, name); removeErr != nil {
 			logger.Warn("removing the placeholders of an old-format archive's import failed; the give-up removes them", "vm", name, "error", removeErr)
 		}

@@ -59,7 +59,7 @@ func (a *slowArchive) Read(buffer []byte) (int, error) {
 }
 
 // An import is one request whose body is a whole disk archive: hours for a large one. The import loop's client puts no
-// limit on the whole request, and limits only a write that moves nothing, so an upload that keeps moving is never cut
+// limit on the whole request, and limits a write that moves nothing, so an upload that keeps moving is never cut
 // (titan-ops features/backup/design.md#restore-as-new-resource).
 func TestConnectForImports_AnUploadLongerThanTheLimit_IsNotCut(t *testing.T) {
 	const limit = 500 * time.Millisecond

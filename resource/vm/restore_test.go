@@ -1433,10 +1433,12 @@ func TestRestore_GiveUp_OfACopyIncusIsStillImporting_IsRetryable_AndNothingIsRem
 }
 
 // The restore never starts the copy; one found running all the same, and not finished, is still what the command made.
-func TestRestore_GiveUp_OfAnUnfinishedCopyThatIsRunning_RemovesItAllTheSame(t *testing.T) {
+func TestRestore_GiveUp_OfAnUnfinishedCopyThatIsRunning_AsksItsDelete_AndEndsTheCreateFailed_WithItsId(t *testing.T) {
 	s := newRestoreScene(t, archiveOf())
 	s.alreadyImported(map[string]map[string]string{"root": rootDisk()}, "backup")
 	s.copyOnIncus(t).Status, s.copyOnIncus(t).StatusCode = "Running", api.Running
+	// Incus deletes an instance only once it is stopped.
+	s.p.DeleteInstanceErr = errors.New("Instance is running")
 
 	err := s.giveUp(restoreLeased(nil, nil), errors.New("roll vm back: locked"))
 
@@ -1446,7 +1448,7 @@ func TestRestore_GiveUp_OfAnUnfinishedCopyThatIsRunning_RemovesItAllTheSame(t *t
 	if want := []string{"delete-vm " + project + "/" + instanceName}; !slices.Equal(s.p.Writes, want) {
 		t.Errorf("writes\n got %q\nwant %q", s.p.Writes, want)
 	}
-	wantReport := `{"outcome":"Failed","reason":"` + restoreFailedText + `","detail":"roll vm back: locked"}`
+	wantReport := `{"outcome":"Failed","externalId":"` + instanceName + `","reason":"` + restoreFailedText + `","detail":"roll vm back: locked"}`
 	if got := s.reportBody(t); got != wantReport {
 		t.Errorf("report\n got %s\nwant %s", got, wantReport)
 	}

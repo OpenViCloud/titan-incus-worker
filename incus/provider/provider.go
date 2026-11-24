@@ -19,8 +19,8 @@ type Provider interface {
 	// DeleteProject removes an empty project: Incus refuses one that still holds an instance, volume or network. Only a
 	// restore drill's temporary project is ever deleted (titan-ops features/backup/design.md#restore-drill).
 	DeleteProject(ctx context.Context, name string) error
-	// GetStoragePoolResources answers the pool's space in bytes, as `incus storage info` does: every archive import
-	// (restore.CheckPoolRoom) checks it before it imports anything.
+	// GetStoragePoolResources answers the pool's space in bytes, as `incus storage info` does: a drill and each restore
+	// of one VM or volume check it (restore.CheckPoolRoom) before they import anything.
 	GetStoragePoolResources(ctx context.Context, pool string) (*api.ResourcesStoragePool, error)
 	// ListProjects and ListProfiles read what a cluster's config backup keeps (titan-ops features/backup/design.md#cluster-backup).
 	ListProjects(ctx context.Context) ([]api.Project, error)
