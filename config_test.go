@@ -86,7 +86,7 @@ func controlPlaneKinds(t *testing.T) []string {
 // removed one until the control plane has stopped
 // (titan-ops architecture/provider-and-worker.md#contract-changes).
 func TestRoutes_CoverTheControlPlanesKinds(t *testing.T) {
-	routes := routes(nil, nil, "", backup.Target{})
+	routes := routes(nil, nil, nil, "", backup.Target{})
 	kinds := controlPlaneKinds(t)
 
 	for _, kind := range kinds {
@@ -100,7 +100,7 @@ func TestRoutes_CoverTheControlPlanesKinds(t *testing.T) {
 // A stop may wait the longest stop timeout a VM takes, 1800 s, before it powers the VM off
 // (titan-ops features/vm/design.md#vm-stop-timeout).
 func TestRoutes_AStopOutlastsTheLongestStopTimeout(t *testing.T) {
-	stop := routes(nil, nil, "", backup.Target{})["vm.stop"]
+	stop := routes(nil, nil, nil, "", backup.Target{})["vm.stop"]
 
 	if stop.Timeout < 1800*time.Second+5*time.Minute {
 		t.Fatalf("vm.stop gives up after %s", stop.Timeout)
@@ -126,9 +126,10 @@ func TestLoadConfig_ReadsTheBackupTarget_AndStartsWithoutIt(t *testing.T) {
 	}
 }
 
-// A backup holds its loop for the whole upload; tenant commands must be leased by a loop that never runs one.
+// A backup holds its loop for the whole upload, a drill or a restore from an archive for the whole import; tenant
+// commands must be leased by a loop that never runs one.
 func TestBackupKinds_HaveALoopOfTheirOwn(t *testing.T) {
-	tenant, backups, drills := splitRoutes(routes(nil, nil, "", backup.Target{}))
+	tenant, backups, imports := splitRoutes(routes(nil, nil, nil, "", backup.Target{}))
 
 	names := []string{}
 	for kind := range backups {
@@ -138,13 +139,19 @@ func TestBackupKinds_HaveALoopOfTheirOwn(t *testing.T) {
 	if strings.Join(names, ",") != "cluster.backup,vm.backup,volume.backup" {
 		t.Fatalf("backup loop: %v", names)
 	}
+	// Rolling a volume back to a snapshot of its own imports no archive: it is a tenant's command like any other.
+	const snapshotRestore = "volume-snapshot.restore"
 	for kind := range tenant {
-		if strings.HasSuffix(kind, ".backup") || strings.HasSuffix(kind, ".drill") {
+		isLong := strings.HasSuffix(kind, ".backup") || strings.HasSuffix(kind, ".drill") || strings.HasSuffix(kind, ".restore")
+		if isLong && kind != snapshotRestore {
 			t.Errorf("%s is leased by the tenant loop", kind)
 		}
 	}
-	if len(tenant)+len(backups)+len(drills) != len(routes(nil, nil, "", backup.Target{})) {
-		t.Fatalf("a route was lost: %d + %d + %d", len(tenant), len(backups), len(drills))
+	if tenant[snapshotRestore].Handler == nil {
+		t.Errorf("%s left the tenant loop", snapshotRestore)
+	}
+	if len(tenant)+len(backups)+len(imports) != len(routes(nil, nil, nil, "", backup.Target{})) {
+		t.Fatalf("a route was lost: %d + %d + %d", len(tenant), len(backups), len(imports))
 	}
 	for kind, route := range backups {
 		if route.Handler == nil || route.Timeout <= 0 {

@@ -33,8 +33,9 @@ func (c *LogCapture) Write(line []byte) (int, error) {
 	return c.buffer.Write(line)
 }
 
-// Records returns every line with the message msg, decoded.
-func (c *LogCapture) Records(msg string) []map[string]any {
+// All returns every line, decoded. A key written twice on a line reads as its last value: the one the line itself
+// set, over the one a With before it set.
+func (c *LogCapture) All() []map[string]any {
 	c.t.Helper()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -47,6 +48,16 @@ func (c *LogCapture) Records(msg string) []map[string]any {
 		if err := json.Unmarshal(line, &record); err != nil {
 			c.t.Fatalf("log line is not JSON: %s", line)
 		}
+		records = append(records, record)
+	}
+	return records
+}
+
+// Records returns every line with the message msg, decoded.
+func (c *LogCapture) Records(msg string) []map[string]any {
+	c.t.Helper()
+	records := []map[string]any{}
+	for _, record := range c.All() {
 		if record["msg"] == msg {
 			records = append(records, record)
 		}

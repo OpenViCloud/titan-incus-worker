@@ -67,9 +67,19 @@ func (f Fixed) Cluster(ctx context.Context, clusterId string) (*Cluster, error) 
 
 type ConnectFunc func(provider.Credentials) (provider.Provider, error)
 
-// ConnectIncusWithoutRequestTimeout is the restore's ConnectFunc: an archive import is one long request.
+// ConnectIncusWithoutRequestTimeout is the cluster restore's ConnectFunc: an archive import is one long request.
 func ConnectIncusWithoutRequestTimeout(credentials provider.Credentials) (provider.Provider, error) {
 	server, err := provider.ConnectWithoutRequestTimeout(credentials)
+	if err != nil {
+		return nil, err
+	}
+	return provider.NewIncus(server), nil
+}
+
+// ConnectIncusForImports is the ConnectFunc of the worker's import loop: an archive import is one long request, and
+// one that stops moving, its upload or the wait for its answer, must still end.
+func ConnectIncusForImports(credentials provider.Credentials) (provider.Provider, error) {
+	server, err := provider.ConnectForImports(credentials)
 	if err != nil {
 		return nil, err
 	}

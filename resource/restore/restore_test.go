@@ -16,6 +16,7 @@ import (
 	"go.yaml.in/yaml/v4"
 
 	"github.com/OpenViCloud/titan-incus-worker/incus/cluster"
+	"github.com/OpenViCloud/titan-incus-worker/incus/provider"
 	"github.com/OpenViCloud/titan-incus-worker/resource/backup"
 	"github.com/OpenViCloud/titan-incus-worker/testsupport"
 )
@@ -75,9 +76,9 @@ func (p *orderedProvider) ImportVolume(ctx context.Context, project string, pool
 	return p.Provider.ImportVolume(ctx, project, pool, name, body)
 }
 
-func (p *orderedProvider) ImportInstance(ctx context.Context, project string, pool string, name string, body io.Reader) error {
+func (p *orderedProvider) ImportInstance(ctx context.Context, project string, pool string, name string, body io.Reader, overrides provider.InstanceOverrides) error {
 	*p.order = append(*p.order, "import-instance "+name)
-	if err := p.Provider.ImportInstance(ctx, project, pool, name, body); err != nil {
+	if err := p.Provider.ImportInstance(ctx, project, pool, name, body, overrides); err != nil {
 		return err
 	}
 	// An imported vm has the NIC its archive declares, as on Incus.
