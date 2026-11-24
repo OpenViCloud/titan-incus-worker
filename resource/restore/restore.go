@@ -4,9 +4,10 @@
 // Titan's database only decides which resources still exist, which VMs to start, and which snapshots or firewall
 // rules to remove because Titan deleted them after the backup point.
 //
-// The steps that take one archive into Incus (ImportVolume, ImportVm and the ones beside them) and the pool-room rule
-// are also what the commands that import a single VM or volume run, vm.restore reads the archive's index here, and
-// the key by which a restore of one says its copy is finished is kept here for both
+// The steps that take one archive into Incus (ImportVolume, ImportVm and the ones beside them) are shared with the
+// commands that import a single VM or volume. Those commands alone also use the pool-room rule (CheckPoolRoom) kept
+// here, vm.restore reads the archive's index here, and the key by which a restore of one says its copy is finished is
+// kept here for both
 // (titan-ops features/backup/design.md#restore-drill, titan-ops features/backup/design.md#restore-as-new-resource).
 package restore
 
