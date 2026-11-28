@@ -61,7 +61,7 @@ func TestLoadConfig_ReadsTheMetricsInterval(t *testing.T) {
 }
 
 // The control plane's kinds, read from its C# source as copied by scripts/sync-kinds.sh rather than retyped: a kind
-// added there and not routed here would stay Pending forever
+// added there, not the function worker's, and not routed here would stay Pending forever
 // (titan-ops architecture/provider-and-worker.md#provider-command-table).
 const providerCommandKindsSource = "contract/ProviderCommandKinds.cs"
 
