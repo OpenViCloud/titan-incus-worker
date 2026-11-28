@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OpenViCloud/titan-incus-worker/loop/command"
 	"github.com/OpenViCloud/titan-incus-worker/resource/backup"
 )
 
@@ -82,6 +83,26 @@ func controlPlaneKinds(t *testing.T) []string {
 	return kinds
 }
 
+// isFunctionWorkerKind: the kinds of the function service, `function.*` and `function-runtime.*`, which the function
+// worker leases and this worker never asks for (titan-ops architecture/provider-commands.md#provider-command-table).
+func isFunctionWorkerKind(kind string) bool {
+	return strings.HasPrefix(kind, "function.") || strings.HasPrefix(kind, "function-runtime.")
+}
+
+// uncoveredKinds: the control plane's kinds, other than the function worker's, that have no route with a timeout here.
+func uncoveredKinds(routes map[string]command.Route, kinds []string) []string {
+	uncovered := []string{}
+	for _, kind := range kinds {
+		if isFunctionWorkerKind(kind) {
+			continue
+		}
+		if route, found := routes[kind]; !found || route.Timeout <= 0 {
+			uncovered = append(uncovered, kind)
+		}
+	}
+	return uncovered
+}
+
 // A route with no kind yet is allowed: the worker ships a new kind before the control plane enqueues it, and keeps a
 // removed one until the control plane has stopped
 // (titan-ops architecture/provider-and-worker.md#contract-changes).
@@ -89,10 +110,38 @@ func TestRoutes_CoverTheControlPlanesKinds(t *testing.T) {
 	routes := routes(nil, nil, nil, "", backup.Target{})
 	kinds := controlPlaneKinds(t)
 
-	for _, kind := range kinds {
-		route, found := routes[kind]
-		if !found || route.Timeout <= 0 {
-			t.Errorf("%s: no route, or a route without a timeout", kind)
+	for _, kind := range uncoveredKinds(routes, kinds) {
+		t.Errorf("%s: no route, or a route without a timeout", kind)
+	}
+}
+
+// A kind of the function service is the function worker's, the one other worker that leases from the control plane:
+// each kind belongs to exactly one worker (titan-ops architecture/provider-commands.md#provider-command-table).
+func TestUncoveredKinds_LeavesTheFunctionKindsToTheFunctionWorker(t *testing.T) {
+	routes := map[string]command.Route{"vm.create": {Timeout: time.Minute}}
+
+	uncovered := uncoveredKinds(routes, []string{"vm.create", "function-runtime.sync", "function.deploy", "vm.delete"})
+
+	if len(uncovered) != 1 || uncovered[0] != "vm.delete" {
+		t.Fatalf("uncovered %v, want only vm.delete", uncovered)
+	}
+}
+
+func TestRoutes_RouteNoKindOfTheFunctionWorker(t *testing.T) {
+	for kind := range routes(nil, nil, nil, "", backup.Target{}) {
+		if isFunctionWorkerKind(kind) {
+			t.Errorf("%s: a kind of the function worker routed here", kind)
+		}
+	}
+}
+
+func TestIsFunctionWorkerKind_IsThePrefixOfTheFunctionService(t *testing.T) {
+	for kind, want := range map[string]bool{
+		"function.deploy": true, "function-runtime.sync": true, "function.": true,
+		"functions.deploy": false, "function-secret.create": false, "vm.create": false, "template.sync": false,
+	} {
+		if got := isFunctionWorkerKind(kind); got != want {
+			t.Errorf("%s: %v, want %v", kind, got, want)
 		}
 	}
 }

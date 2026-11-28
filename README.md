@@ -62,7 +62,9 @@ go build -o incus-worker .
 `contract/ProviderCommandKinds.cs` is a verbatim copy of the control plane's list of command kinds, and
 `contract/SOURCE` names the [OpenViCloud/titan-control-plane](https://github.com/OpenViCloud/titan-control-plane) commit it was
 copied from. A test fails when a kind in that copy has no route here; a route with no kind yet is allowed, since a new
-kind ships here before the control plane enqueues it. The control plane's CI runs the same test with its own kinds
+kind ships here before the control plane enqueues it. The kinds of the function service (`function.*`,
+`function-runtime.*`) are not this worker's: [OpenViCloud/titan-function-worker](https://github.com/OpenViCloud/titan-function-worker)
+leases them, this worker routes none of them, and the test leaves them out. The control plane's CI runs the same test with its own kinds
 against this repo's `main`: a control plane change adding a kind this repo does not route yet fails its check, and no
 control plane image is published from it.
 To take a newer list:
